@@ -55,11 +55,23 @@ function App() {
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [banner, setBanner] = useState<BannerState>({ enabled: false, text: '' });
+  const [showLoader, setShowLoader] = useState(false);
+  const isBlockingLoading = authLoading || (user && orgLoading && !profile);
 
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!isBlockingLoading) {
+      setShowLoader(false);
+      return;
+    }
+
+    const timeout = setTimeout(() => setShowLoader(true), 300);
+    return () => clearTimeout(timeout);
+  }, [isBlockingLoading]);
 
   useEffect(() => {
     try {
@@ -277,7 +289,7 @@ function App() {
 
   const isPublicRoute = view.type === 'redirect' || view.type === 'secret' || view.type === 'paste' || view.type === 'paste-list';
 
-  if (authLoading || (user && orgLoading && !profile)) {
+  if (showLoader) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
         <div className="text-center">
