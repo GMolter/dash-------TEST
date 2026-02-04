@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AnimatedBackground } from './components/AnimatedBackground';
 import { Quicklinks } from './components/Quicklinks';
 import { Triggers } from './components/Triggers';
@@ -55,7 +55,10 @@ function App() {
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [banner, setBanner] = useState<BannerState>({ enabled: false, text: '' });
-  const [showLoader, setShowLoader] = useState(false);
+  const [loaderState, setLoaderState] = useState<'idle' | 'pending' | 'shown' | 'done'>('idle');
+  const showTimeoutRef = useRef<number | null>(null);
+  const hideTimeoutRef = useRef<number | null>(null);
+  const shownAtRef = useRef<number | null>(null);
   const isBlockingLoading = authLoading || (user && orgLoading && !profile);
 
   useEffect(() => {
@@ -64,14 +67,42 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isBlockingLoading) {
-      setShowLoader(false);
+    if (loaderState === 'done') return;
+
+    if (isBlockingLoading) {
+      if (loaderState === 'idle') {
+        setLoaderState('pending');
+        showTimeoutRef.current = window.setTimeout(() => {
+          shownAtRef.current = Date.now();
+          setLoaderState('shown');
+        }, 300);
+      }
       return;
     }
 
-    const timeout = setTimeout(() => setShowLoader(true), 300);
-    return () => clearTimeout(timeout);
-  }, [isBlockingLoading]);
+    if (loaderState === 'pending') {
+      if (showTimeoutRef.current) {
+        clearTimeout(showTimeoutRef.current);
+        showTimeoutRef.current = null;
+      }
+      setLoaderState('done');
+      return;
+    }
+
+    if (loaderState === 'shown') {
+      const shownAt = shownAtRef.current ?? Date.now();
+      const elapsed = Date.now() - shownAt;
+      const remaining = Math.max(0, 500 - elapsed);
+      hideTimeoutRef.current = window.setTimeout(() => {
+        setLoaderState('done');
+      }, remaining);
+    }
+
+    return () => {
+      if (showTimeoutRef.current) clearTimeout(showTimeoutRef.current);
+      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+    };
+  }, [isBlockingLoading, loaderState]);
 
   useEffect(() => {
     try {
@@ -289,11 +320,11 @@ function App() {
 
   const isPublicRoute = view.type === 'redirect' || view.type === 'secret' || view.type === 'paste' || view.type === 'paste-list';
 
-  if (showLoader) {
+  if (loaderState === 'shown') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <div className="rounded-full h-12 w-12 border-2 border-blue-500/60 mx-auto mb-4"></div>
           <p className="text-slate-400">Loading...</p>
         </div>
       </div>
