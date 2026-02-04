@@ -13,9 +13,11 @@ interface Paste {
   expires_at?: string;
   views: number;
   created_at: string;
-  visibility?: 'personal' | 'org' | 'public';
   user_id?: string | null;
   org_id?: string | null;
+  scope_personal?: boolean;
+  scope_org?: boolean;
+  scope_public?: boolean;
 }
 
 export function Pastebin() {
@@ -25,15 +27,24 @@ export function Pastebin() {
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [language, setLanguage] = useState('plaintext');
   const [expiryOption, setExpiryOption] = useState('never');
   const [copied, setCopied] = useState<string | null>(null);
   const [visibility, setVisibility] = useState<'personal' | 'org' | 'public'>('org');
+  const [scopePersonal, setScopePersonal] = useState(false);
+  const [scopeOrg, setScopeOrg] = useState(true);
+  const [scopePublic, setScopePublic] = useState(false);
+  const hasScope = scopePersonal || scopeOrg || scopePublic;
 
   useEffect(() => {
     loadPastes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibility, organization?.id, user?.id]);
+
+  useEffect(() => {
+    if (!organization && scopeOrg) {
+      setScopeOrg(false);
+    }
+  }, [organization, scopeOrg]);
 
   const loadPastes = async () => {
     if (!user) {
@@ -47,15 +58,15 @@ export function Pastebin() {
       .limit(5);
 
     if (visibility === 'personal') {
-      query = query.eq('visibility', 'personal').eq('user_id', user.id);
+      query = query.eq('scope_personal', true).eq('user_id', user.id);
     } else if (visibility === 'org') {
       if (!organization) {
         setPastes([]);
         return;
       }
-      query = query.eq('visibility', 'org').eq('org_id', organization.id);
+      query = query.eq('scope_org', true).eq('org_id', organization.id);
     } else {
-      query = query.eq('visibility', 'public').eq('user_id', user.id);
+      query = query.eq('scope_public', true).eq('user_id', user.id);
     }
 
     const { data, error } = await query;
@@ -89,7 +100,8 @@ export function Pastebin() {
 
   const createPaste = async () => {
     if (!content.trim() || !user) return;
-    if (visibility === 'org' && !organization) return;
+    if (scopeOrg && !organization) return;
+    if (!hasScope) return;
 
     const pasteCode = generatePasteCode();
     const expiresAt = getExpiryDate();
@@ -98,17 +110,18 @@ export function Pastebin() {
       paste_code: pasteCode,
       title: title || 'Untitled',
       content: content,
-      language: language,
+      language: 'markdown',
       expires_at: expiresAt,
-      visibility,
       user_id: user.id,
-      org_id: visibility === 'org' ? organization?.id : null,
+      org_id: scopeOrg ? organization?.id : null,
+      scope_personal: scopePersonal,
+      scope_org: scopeOrg,
+      scope_public: scopePublic,
     });
 
     if (!error) {
       setTitle('');
       setContent('');
-      setLanguage('plaintext');
       setExpiryOption('never');
       setShowForm(false);
       loadPastes();
@@ -137,26 +150,6 @@ export function Pastebin() {
     if (!expiresAt) return false;
     return new Date(expiresAt) < new Date();
   };
-
-  const languages = [
-    'plaintext',
-    'javascript',
-    'typescript',
-    'python',
-    'java',
-    'csharp',
-    'php',
-    'ruby',
-    'go',
-    'rust',
-    'html',
-    'css',
-    'sql',
-    'bash',
-    'json',
-    'xml',
-    'markdown',
-  ];
 
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm rounded-lg p-6 border border-slate-700">
@@ -222,6 +215,48 @@ export function Pastebin() {
 
       {showForm && (
         <div className="mb-4 space-y-2 p-4 bg-slate-900/50 rounded-lg">
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setScopePersonal((v) => !v)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                scopePersonal
+                  ? 'bg-blue-600/20 border-blue-500/40 text-blue-200'
+                  : 'bg-slate-700/40 border-slate-700 text-slate-300 hover:bg-slate-700/60'
+              }`}
+            >
+              Personal
+            </button>
+            <button
+              onClick={() => {
+                if (!organization) return;
+                setScopeOrg((v) => !v);
+              }}
+              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                scopeOrg
+                  ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-200'
+                  : organization
+                    ? 'bg-slate-700/40 border-slate-700 text-slate-300 hover:bg-slate-700/60'
+                    : 'bg-slate-800/60 border-slate-800 text-slate-500 cursor-not-allowed'
+              }`}
+              title={!organization ? 'Join an organization to use org scope' : undefined}
+            >
+              Org
+            </button>
+            <button
+              onClick={() => setScopePublic((v) => !v)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                scopePublic
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                  : 'bg-slate-700/40 border-slate-700 text-slate-300 hover:bg-slate-700/60'
+              }`}
+            >
+              Public
+            </button>
+            <div className="ml-auto text-xs text-slate-400 flex items-center">
+              {!hasScope && 'Select at least one audience.'}
+              {hasScope && 'Choose one or more audiences.'}
+            </div>
+          </div>
           <input
             type="text"
             placeholder="Title (optional)"
@@ -238,20 +273,9 @@ export function Pastebin() {
           />
           <div className="flex gap-2">
             <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value)}
-              className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {languages.map((lang) => (
-                <option key={lang} value={lang}>
-                  {lang}
-                </option>
-              ))}
-            </select>
-            <select
               value={expiryOption}
               onChange={(e) => setExpiryOption(e.target.value)}
-              className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="never">Never expires</option>
               <option value="1hour">1 hour</option>
@@ -262,7 +286,8 @@ export function Pastebin() {
           </div>
           <button
             onClick={createPaste}
-            className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
+            disabled={!hasScope || !content.trim() || (scopeOrg && !organization)}
+            className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed rounded-lg text-white font-medium transition-colors"
           >
             Create Paste
           </button>

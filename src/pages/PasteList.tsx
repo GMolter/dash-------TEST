@@ -27,7 +27,7 @@ export function PasteList() {
     const { data, error } = await supabase
       .from('pastes')
       .select('*')
-      .eq('visibility', 'public')
+      .eq('scope_public', true)
       .order('created_at', { ascending: false })
       .limit(showCount);
 
