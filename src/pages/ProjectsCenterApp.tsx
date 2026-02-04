@@ -14,6 +14,7 @@ import {
 import { AnimatedBackground } from '../components/AnimatedBackground';
 import { supabase } from '../lib/supabase';
 import { useOrg } from '../hooks/useOrg';
+import { useAuth } from '../hooks/useAuth';
 
 type ProjectStatus = 'planning' | 'active' | 'review' | 'completed' | 'archived';
 type Filter = 'all' | 'active' | 'completed' | 'archived';
@@ -86,16 +87,19 @@ export function ProjectsCenterApp({
 }: {
   onOpenProject: (id: string) => void;
 }) {
+  const { user } = useAuth();
   const { organization } = useOrg();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [query, setQuery] = useState('');
+  const [projectScope, setProjectScope] = useState<'org' | 'personal'>('org');
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<Sort>('recent');
 
   // Modals
   const [createOpen, setCreateOpen] = useState(false);
+  const [createScope, setCreateScope] = useState<'org' | 'personal'>('org');
   const [commandOpen, setCommandOpen] = useState(false);
   const [ctrlHintOpen, setCtrlHintOpen] = useState(false);
 
@@ -108,23 +112,36 @@ export function ProjectsCenterApp({
   const [commandQuery, setCommandQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const commandInputRef = useRef<HTMLInputElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchIndex, setSearchIndex] = useState(0);
 
   // Ctrl-hold overlay timer
   const ctrlHoldTimer = useRef<number | null>(null);
 
   async function load() {
-    if (!organization) {
+    if (!user) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+
+    if (projectScope === 'org' && !organization) {
       setProjects([]);
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    const { data } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('org_id', organization.id)
-      .order('updated_at', { ascending: false });
+    let query = supabase.from('projects').select('*').order('updated_at', { ascending: false });
+
+    if (projectScope === 'org') {
+      query = query.eq('org_id', organization?.id || '');
+    } else {
+      query = query.eq('user_id', user.id).is('org_id', null);
+    }
+
+    const { data } = await query;
     setProjects((data as Project[]) || []);
     setLoading(false);
   }
@@ -132,7 +149,19 @@ export function ProjectsCenterApp({
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organization?.id]);
+  }, [organization?.id, projectScope, user?.id]);
+
+  useEffect(() => {
+    if (!organization && projectScope === 'org') {
+      setProjectScope('personal');
+    }
+  }, [organization, projectScope]);
+
+  useEffect(() => {
+    if (!organization && createScope === 'org') {
+      setCreateScope('personal');
+    }
+  }, [organization, createScope]);
 
   // Visible projects (grid)
   const visibleProjects = useMemo(() => {
@@ -170,6 +199,11 @@ export function ProjectsCenterApp({
     return sorted;
   }, [projects, query, filter, sort]);
 
+  const searchResults = useMemo(() => {
+    if (!query.trim()) return [];
+    return visibleProjects.slice(0, 8);
+  }, [query, visibleProjects]);
+
   // Command items (actions + projects)
   const commandItems = useMemo<BannerAction[]>(() => {
     const q = commandQuery.trim().toLowerCase();
@@ -182,6 +216,7 @@ export function ProjectsCenterApp({
         hint: 'Templates',
         run: () => {
           setCommandOpen(false);
+          setCreateScope(projectScope);
           setCreateOpen(true);
         },
       },
@@ -242,7 +277,7 @@ export function ProjectsCenterApp({
 
     if (!q) return all;
     return all.filter((i) => `${i.label} ${i.hint}`.toLowerCase().includes(q));
-  }, [commandQuery, projects, onOpenProject]);
+  }, [commandQuery, projects, onOpenProject, projectScope]);
 
   // Keep selectedIndex in bounds when list changes
   useEffect(() => {
@@ -319,9 +354,27 @@ export function ProjectsCenterApp({
     }
   }, [commandOpen]);
 
+  useEffect(() => {
+    if (!query.trim()) {
+      setSearchOpen(false);
+      setSearchIndex(0);
+    } else {
+      setSearchIndex(0);
+    }
+  }, [query]);
+
+  useEffect(() => {
+    if (!searchResults.length) {
+      setSearchIndex(0);
+      return;
+    }
+    setSearchIndex((i) => Math.min(i, Math.max(0, searchResults.length - 1)));
+  }, [searchResults.length]);
+
   async function createProject() {
     const name = newName.trim();
-    if (!name || !organization) return;
+    if (!name || !user) return;
+    if (createScope === 'org' && !organization) return;
 
     const tagSeed = template === 'blank' ? [] : template === 'personal' ? ['personal'] : ['school'];
 
@@ -332,7 +385,8 @@ export function ProjectsCenterApp({
         description: newDesc.trim(),
         status: 'planning',
         tags: tagSeed,
-        org_id: organization.id,
+        org_id: createScope === 'org' ? organization?.id : null,
+        user_id: createScope === 'personal' ? user.id : null,
       })
       .select('*')
       .single();
@@ -390,7 +444,10 @@ export function ProjectsCenterApp({
 
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setCreateOpen(true)}
+                onClick={() => {
+                  setCreateScope(projectScope);
+                  setCreateOpen(true);
+                }}
                 className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-blue-500/20 border border-blue-500/30 text-blue-200 hover:bg-blue-500/25 transition-colors"
               >
                 <FolderPlus className="w-5 h-5" />
@@ -408,11 +465,70 @@ export function ProjectsCenterApp({
               <div className="relative flex-1 max-w-[680px]">
                 <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                 <input
+                  ref={searchInputRef}
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setSearchOpen(true);
+                  }}
+                  onFocus={() => setSearchOpen(!!query.trim())}
+                  onBlur={() => {
+                    window.setTimeout(() => setSearchOpen(false), 150);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!searchResults.length) return;
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setSearchOpen(true);
+                      setSearchIndex((i) => Math.min(i + 1, searchResults.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSearchOpen(true);
+                      setSearchIndex((i) => Math.max(i - 1, 0));
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const chosen = searchResults[searchIndex];
+                      if (chosen) {
+                        setSearchOpen(false);
+                        onOpenProject(chosen.id);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setSearchOpen(false);
+                    }
+                  }}
                   placeholder="Search projects…"
                   className="w-full pl-12 pr-4 py-3 rounded-2xl bg-slate-950/40 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                 />
+                {searchOpen && searchResults.length > 0 && (
+                  <div className="absolute left-0 right-0 mt-2 z-20 rounded-2xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-xl overflow-hidden">
+                    {searchResults.map((p, idx) => {
+                      const active = idx === searchIndex;
+                      return (
+                        <button
+                          key={p.id}
+                          onMouseEnter={() => setSearchIndex(idx)}
+                          onClick={() => {
+                            setSearchOpen(false);
+                            onOpenProject(p.id);
+                          }}
+                          className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 transition-colors ${
+                            active ? 'bg-slate-900/60' : 'hover:bg-slate-900/40'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold truncate">{p.name}</div>
+                            <div className="text-xs text-slate-400 truncate">
+                              {p.description || 'No description'}
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-400 whitespace-nowrap">
+                            {formatRelative(p.updated_at || p.created_at)}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -432,6 +548,32 @@ export function ProjectsCenterApp({
             </div>
 
             <div className="flex items-center gap-3">
+              <div className="inline-flex items-center gap-2 px-2 py-2 rounded-2xl border border-slate-800/60 bg-slate-950/20">
+                <button
+                  onClick={() => setProjectScope('org')}
+                  disabled={!organization}
+                  className={`px-3 py-2 rounded-2xl text-sm transition-colors ${
+                    projectScope === 'org'
+                      ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/30'
+                      : organization
+                        ? 'text-slate-300 hover:bg-slate-900/40'
+                        : 'text-slate-600 cursor-not-allowed'
+                  }`}
+                  title={!organization ? 'Join an organization to view org projects' : undefined}
+                >
+                  Org
+                </button>
+                <button
+                  onClick={() => setProjectScope('personal')}
+                  className={`px-3 py-2 rounded-2xl text-sm transition-colors ${
+                    projectScope === 'personal'
+                      ? 'bg-blue-500/20 text-blue-200 border border-blue-500/30'
+                      : 'text-slate-300 hover:bg-slate-900/40'
+                  }`}
+                >
+                  Personal
+                </button>
+              </div>
               <Dropdown<Sort>
                 value={sort}
                 onChange={setSort}
@@ -456,7 +598,10 @@ export function ProjectsCenterApp({
           {/* Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
             <button
-              onClick={() => setCreateOpen(true)}
+              onClick={() => {
+                setCreateScope(projectScope);
+                setCreateOpen(true);
+              }}
               className="group rounded-3xl border border-slate-800/60 bg-slate-950/20 hover:bg-slate-900/35 transition-colors p-5 text-left"
             >
               <div className="flex items-center gap-3">
@@ -594,6 +739,36 @@ export function ProjectsCenterApp({
             />
           </div>
 
+          <div className="mt-6">
+            <div className="text-sm text-slate-300 mb-2">Project visibility</div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setCreateScope('personal')}
+                className={`px-3 py-2 rounded-2xl text-sm border transition-colors ${
+                  createScope === 'personal'
+                    ? 'bg-blue-500/20 border-blue-500/30 text-blue-200'
+                    : 'bg-slate-900/20 border-slate-800/60 text-slate-300 hover:bg-slate-900/35'
+                }`}
+              >
+                Personal
+              </button>
+              <button
+                onClick={() => setCreateScope('org')}
+                disabled={!organization}
+                className={`px-3 py-2 rounded-2xl text-sm border transition-colors ${
+                  createScope === 'org'
+                    ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-200'
+                    : organization
+                      ? 'bg-slate-900/20 border-slate-800/60 text-slate-300 hover:bg-slate-900/35'
+                      : 'bg-slate-900/10 border-slate-800/60 text-slate-600 cursor-not-allowed'
+                }`}
+                title={!organization ? 'Join an organization to create org projects' : undefined}
+              >
+                Org
+              </button>
+            </div>
+          </div>
+
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <div className="text-sm text-slate-300 mb-2">Project name</div>
@@ -632,9 +807,9 @@ export function ProjectsCenterApp({
             </button>
             <button
               onClick={createProject}
-              disabled={!newName.trim()}
+              disabled={!newName.trim() || (createScope === 'org' && !organization)}
               className={`px-4 py-3 rounded-2xl border transition-colors ${
-                newName.trim()
+                newName.trim() && !(createScope === 'org' && !organization)
                   ? 'bg-blue-500/20 border-blue-500/30 text-blue-200 hover:bg-blue-500/25'
                   : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
               }`}

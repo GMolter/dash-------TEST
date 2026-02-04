@@ -18,6 +18,7 @@ import { ResourcesView } from '../components/ResourcesView';
 import { OverviewView } from '../components/OverviewView';
 import { supabase } from '../lib/supabase';
 import { useOrg } from '../hooks/useOrg';
+import { useAuth } from '../hooks/useAuth';
 import {
   FileNode,
   ensureDefaultTree,
@@ -88,16 +89,26 @@ function stopIfEditableTarget(e: KeyboardEvent) {
   return tag === 'input' || tag === 'textarea' || el.isContentEditable;
 }
 
+function navigateTo(path: string) {
+  window.history.pushState({}, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 export function ProjectDashboard({
   projectId,
   onBack,
 }: {
   projectId?: string;
-  onBack: () => void;
+  onBack?: () => void;
 }) {
+  const { user } = useAuth();
   const { organization } = useOrg();
   const [project, setProject] = useState<Project | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
+  const [projectLoading, setProjectLoading] = useState(true);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
 
   // Project search (top)
   const [projectSearch, setProjectSearch] = useState('');
@@ -121,36 +132,88 @@ export function ProjectDashboard({
   const qcWrapRef = useRef<HTMLDivElement | null>(null);
 
   async function loadProject() {
-    if (!projectId || !organization) return;
-    const { data } = await supabase
-      .from('projects')
-      .select('*')
-      .eq('id', projectId)
-      .eq('org_id', organization.id)
-      .maybeSingle();
-    setProject((data as Project) || null);
+    if (!projectId) {
+      setProject(null);
+      setProjectError('Missing project id.');
+      setProjectLoading(false);
+      return;
+    }
+
+    if (!user && !organization) {
+      setProject(null);
+      setProjectError('Sign in required.');
+      setProjectLoading(false);
+      return;
+    }
+    setProjectLoading(true);
+    setProjectError(null);
+
+    try {
+      let query = supabase.from('projects').select('*').eq('id', projectId);
+
+      if (user?.id && organization?.id) {
+        query = query.or(`org_id.eq.${organization.id},user_id.eq.${user.id}`);
+      } else if (user?.id) {
+        query = query.eq('user_id', user.id);
+      } else if (organization?.id) {
+        query = query.eq('org_id', organization.id);
+      }
+
+      const { data, error } = await query.maybeSingle();
+      if (error) throw error;
+
+      if (!data) {
+        setProject(null);
+        setProjectError('Project not found or access denied.');
+        return;
+      }
+
+      setProject(data as Project);
+    } catch (err) {
+      setProject(null);
+      setProjectError(err instanceof Error ? err.message : 'Failed to load project');
+    } finally {
+      setProjectLoading(false);
+    }
   }
 
   async function loadFiles() {
     if (!projectId) return;
-    await ensureDefaultTree(projectId);
-    const list = await listNodes(projectId);
-    setNodes(list);
-    if (!selectedId) {
-      const firstDoc = list.find((n) => n.type === 'doc');
-      setSelectedId(firstDoc?.id || null);
+    setFilesLoading(true);
+    setFilesError(null);
+    try {
+      await ensureDefaultTree(projectId);
+      const list = await listNodes(projectId);
+      setNodes(list);
+      if (!selectedId) {
+        const firstDoc = list.find((n) => n.type === 'doc');
+        setSelectedId(firstDoc?.id || null);
+      }
+    } catch (err) {
+      setFilesError(err instanceof Error ? err.message : 'Failed to load files');
+    } finally {
+      setFilesLoading(false);
     }
   }
 
   useEffect(() => {
     loadProject();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, organization?.id]);
+  }, [projectId, organization?.id, user?.id]);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!project?.id) return;
     loadFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id]);
+
+  useEffect(() => {
+    setNodes([]);
+    setSelectedId(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    setProjectSearch('');
   }, [projectId]);
 
   // Tab changes
@@ -271,6 +334,45 @@ export function ProjectDashboard({
     ];
   }, [ctx, nodes, selectedId]);
 
+  const handleBack = () => {
+    if (onBack) {
+      onBack();
+    } else {
+      navigateTo('/projects');
+    }
+  };
+
+  if (projectLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="rounded-full h-12 w-12 border-2 border-blue-500/60 mx-auto mb-4" />
+          <p className="text-slate-300">Loading project…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (projectError || !project) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-slate-900/70 border border-slate-800/60 rounded-2xl p-6 text-center">
+          <div className="text-xl font-semibold text-white">Project unavailable</div>
+          <div className="mt-2 text-sm text-slate-400">
+            {projectError || 'This project could not be loaded.'}
+          </div>
+          <button
+            onClick={handleBack}
+            className="mt-5 inline-flex items-center gap-2 px-4 py-2 rounded-2xl border border-slate-800/60 bg-slate-900/40 hover:bg-slate-900/55 text-slate-100"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Projects
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen text-white relative overflow-hidden">
       <AnimatedBackground />
@@ -283,7 +385,7 @@ export function ProjectDashboard({
           <div className="px-8 py-5 flex items-center justify-between gap-6">
             <div className="flex items-center gap-4 min-w-0">
               <button
-                onClick={onBack}
+                onClick={handleBack}
                 className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-slate-800/60 bg-slate-900/25 hover:bg-slate-900/45 transition-colors"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -442,6 +544,8 @@ export function ProjectDashboard({
                   </div>
 
                   <div className="mt-4 flex-1 overflow-auto pr-1">
+                    {filesLoading && <div className="text-xs text-slate-400 mb-2">Loading files…</div>}
+                    {filesError && <div className="text-xs text-red-400 mb-2">{filesError}</div>}
                     <FileTreePanel
                       nodes={nodes}
                       selectedId={selectedId}
@@ -597,15 +701,6 @@ function NavItem({
       </span>
       {rightHint ? <span className="text-xs text-slate-400">{rightHint}</span> : null}
     </button>
-  );
-}
-
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-6 min-h-[520px]">
-      <div className="text-2xl font-semibold">{title}</div>
-      <div className="mt-2 text-slate-300">This section will be wired up next.</div>
-    </div>
   );
 }
 
