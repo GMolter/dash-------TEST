@@ -17,6 +17,7 @@ import { BoardView } from '../components/BoardView';
 import { ResourcesView } from '../components/ResourcesView';
 import { OverviewView } from '../components/OverviewView';
 import { supabase } from '../lib/supabase';
+import { useOrg } from '../hooks/useOrg';
 import {
   FileNode,
   ensureDefaultTree,
@@ -94,6 +95,7 @@ export function ProjectDashboard({
   projectId?: string;
   onBack: () => void;
 }) {
+  const { organization } = useOrg();
   const [project, setProject] = useState<Project | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
 
@@ -119,8 +121,13 @@ export function ProjectDashboard({
   const qcWrapRef = useRef<HTMLDivElement | null>(null);
 
   async function loadProject() {
-    if (!projectId) return;
-    const { data } = await supabase.from('projects').select('*').eq('id', projectId).single();
+    if (!projectId || !organization) return;
+    const { data } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('id', projectId)
+      .eq('org_id', organization.id)
+      .maybeSingle();
     setProject((data as Project) || null);
   }
 
@@ -137,7 +144,8 @@ export function ProjectDashboard({
 
   useEffect(() => {
     loadProject();
-  }, [projectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, organization?.id]);
 
   useEffect(() => {
     if (!projectId) return;

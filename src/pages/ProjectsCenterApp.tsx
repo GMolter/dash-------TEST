@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AnimatedBackground } from '../components/AnimatedBackground';
 import { supabase } from '../lib/supabase';
+import { useOrg } from '../hooks/useOrg';
 
 type ProjectStatus = 'planning' | 'active' | 'review' | 'completed' | 'archived';
 type Filter = 'all' | 'active' | 'completed' | 'archived';
@@ -85,6 +86,7 @@ export function ProjectsCenterApp({
 }: {
   onOpenProject: (id: string) => void;
 }) {
+  const { organization } = useOrg();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -111,15 +113,26 @@ export function ProjectsCenterApp({
   const ctrlHoldTimer = useRef<number | null>(null);
 
   async function load() {
+    if (!organization) {
+      setProjects([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
-    const { data } = await supabase.from('projects').select('*').order('updated_at', { ascending: false });
+    const { data } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('org_id', organization.id)
+      .order('updated_at', { ascending: false });
     setProjects((data as Project[]) || []);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id]);
 
   // Visible projects (grid)
   const visibleProjects = useMemo(() => {
@@ -308,7 +321,7 @@ export function ProjectsCenterApp({
 
   async function createProject() {
     const name = newName.trim();
-    if (!name) return;
+    if (!name || !organization) return;
 
     const tagSeed = template === 'blank' ? [] : template === 'personal' ? ['personal'] : ['school'];
 
@@ -319,6 +332,7 @@ export function ProjectsCenterApp({
         description: newDesc.trim(),
         status: 'planning',
         tags: tagSeed,
+        org_id: organization.id,
       })
       .select('*')
       .single();

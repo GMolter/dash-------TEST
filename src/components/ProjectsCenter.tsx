@@ -29,12 +29,14 @@ export function ProjectsCenter() {
 
   useEffect(() => {
     loadProjects();
-  }, []);
+  }, [organization?.id]);
 
   const loadProjects = async () => {
+    if (!organization) return;
     const { data, error } = await supabase
       .from('projects')
       .select('*')
+      .eq('org_id', organization.id)
       .order('created_at', { ascending: false });
 
     if (!error && data) {

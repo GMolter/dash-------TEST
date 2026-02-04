@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { FileText, Copy, ExternalLink, Trash2, Clock, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useOrg } from '../hooks/useOrg';
+import { useAuth } from '../hooks/useAuth';
 
 interface Paste {
   id: string;
@@ -12,10 +13,14 @@ interface Paste {
   expires_at?: string;
   views: number;
   created_at: string;
+  visibility?: 'personal' | 'org' | 'public';
+  user_id?: string | null;
+  org_id?: string | null;
 }
 
 export function Pastebin() {
   const { organization } = useOrg();
+  const { user } = useAuth();
   const [pastes, setPastes] = useState<Paste[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
@@ -23,21 +28,38 @@ export function Pastebin() {
   const [language, setLanguage] = useState('plaintext');
   const [expiryOption, setExpiryOption] = useState('never');
   const [copied, setCopied] = useState<string | null>(null);
+  const [visibility, setVisibility] = useState<'personal' | 'org' | 'public'>('org');
 
   useEffect(() => {
     loadPastes();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibility, organization?.id, user?.id]);
 
   const loadPastes = async () => {
-    const { data, error } = await supabase
+    if (!user) {
+      setPastes([]);
+      return;
+    }
+    let query = supabase
       .from('pastes')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(5);
 
-    if (!error && data) {
-      setPastes(data);
+    if (visibility === 'personal') {
+      query = query.eq('visibility', 'personal').eq('user_id', user.id);
+    } else if (visibility === 'org') {
+      if (!organization) {
+        setPastes([]);
+        return;
+      }
+      query = query.eq('visibility', 'org').eq('org_id', organization.id);
+    } else {
+      query = query.eq('visibility', 'public').eq('user_id', user.id);
     }
+
+    const { data, error } = await query;
+    if (!error && data) setPastes(data as Paste[]);
   };
 
   const generatePasteCode = () => {
@@ -66,7 +88,8 @@ export function Pastebin() {
   };
 
   const createPaste = async () => {
-    if (!content.trim() || !organization) return;
+    if (!content.trim() || !user) return;
+    if (visibility === 'org' && !organization) return;
 
     const pasteCode = generatePasteCode();
     const expiresAt = getExpiryDate();
@@ -77,7 +100,9 @@ export function Pastebin() {
       content: content,
       language: language,
       expires_at: expiresAt,
-      org_id: organization.id,
+      visibility,
+      user_id: user.id,
+      org_id: visibility === 'org' ? organization?.id : null,
     });
 
     if (!error) {
@@ -154,6 +179,44 @@ export function Pastebin() {
           >
             {showForm ? 'Cancel' : 'New Paste'}
           </button>
+        </div>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <button
+          onClick={() => setVisibility('personal')}
+          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+            visibility === 'personal'
+              ? 'bg-blue-600/20 border-blue-500/40 text-blue-200'
+              : 'bg-slate-700/40 border-slate-700 text-slate-300 hover:bg-slate-700/60'
+          }`}
+        >
+          Personal
+        </button>
+        <button
+          onClick={() => setVisibility('org')}
+          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+            visibility === 'org'
+              ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-200'
+              : 'bg-slate-700/40 border-slate-700 text-slate-300 hover:bg-slate-700/60'
+          }`}
+        >
+          Org
+        </button>
+        <button
+          onClick={() => setVisibility('public')}
+          className={`px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+            visibility === 'public'
+              ? 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+              : 'bg-slate-700/40 border-slate-700 text-slate-300 hover:bg-slate-700/60'
+          }`}
+        >
+          Public
+        </button>
+        <div className="ml-auto text-xs text-slate-400 flex items-center">
+          {visibility === 'personal' && 'Only you can view these pastes.'}
+          {visibility === 'org' && 'Visible to your organization.'}
+          {visibility === 'public' && 'Anyone with the link can view.'}
         </div>
       </div>
 
