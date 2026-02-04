@@ -28,7 +28,7 @@ interface OrgContextType {
   members: OrgMember[];
   loading: boolean;
   error: string | null;
-  refreshOrg: () => Promise<void>;
+  refreshOrg: (options?: { silent?: boolean }) => Promise<void>;
   joinOrg: (code: string) => Promise<{ success: boolean; error?: string }>;
   createOrg: (name: string) => Promise<{ success: boolean; error?: string }>;
   updateOrg: (updates: Partial<Organization>) => Promise<{ success: boolean; error?: string }>;
@@ -41,6 +41,45 @@ interface OrgContextType {
 
 const OrgContext = createContext<OrgContextType | undefined>(undefined);
 
+const ORG_CACHE_KEY = 'olio-org-cache-v1';
+const ORG_CACHE_TTL_MS = 1000 * 60 * 60 * 24;
+
+type OrgCache = {
+  userId: string;
+  profile: Profile | null;
+  organization: Organization | null;
+  members: OrgMember[];
+  updatedAt: number;
+};
+
+function readOrgCache(userId: string): OrgCache | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const raw = window.localStorage.getItem(ORG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as OrgCache;
+    if (!parsed || parsed.userId !== userId) return null;
+    if (!parsed.updatedAt || Date.now() - parsed.updatedAt > ORG_CACHE_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeOrgCache(userId: string, profile: Profile | null, organization: Organization | null, members: OrgMember[]) {
+  try {
+    if (typeof window === 'undefined') return;
+    const payload: OrgCache = {
+      userId,
+      profile,
+      organization,
+      members,
+      updatedAt: Date.now(),
+    };
+    window.localStorage.setItem(ORG_CACHE_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
 export function OrgProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading, signOut } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -49,9 +88,10 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refreshOrg = useCallback(async () => {
+  const refreshOrg = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent;
     if (authLoading) {
-      setLoading(true);
+      if (!silent) setLoading(true);
       return;
     }
     if (!user) {
@@ -63,7 +103,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
 
       const { data: profileData, error: profileError } = await supabase
@@ -106,9 +146,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         if (membersError) throw membersError;
 
         setMembers(membersData || []);
+        writeOrgCache(user.id, resolvedProfile, orgData, membersData || []);
       } else {
         setOrganization(null);
         setMembers([]);
+        writeOrgCache(user.id, resolvedProfile, null, []);
       }
 
       setLoading(false);
@@ -117,11 +159,30 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setError(err instanceof Error ? err.message : 'Failed to load organization');
       setLoading(false);
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, signOut]);
 
   useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setProfile(null);
+      setOrganization(null);
+      setMembers([]);
+      setLoading(false);
+      return;
+    }
+
+    const cached = readOrgCache(user.id);
+    if (cached) {
+      setProfile(cached.profile);
+      setOrganization(cached.organization);
+      setMembers(cached.members || []);
+      setLoading(false);
+      refreshOrg({ silent: true });
+      return;
+    }
+
     refreshOrg();
-  }, [refreshOrg]);
+  }, [authLoading, user, refreshOrg]);
 
   const joinOrg = async (code: string) => {
     if (!user) return { success: false, error: 'Not authenticated' };
