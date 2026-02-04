@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { AnimatedBackground } from './components/AnimatedBackground';
 import { Quicklinks } from './components/Quicklinks';
 import { Triggers } from './components/Triggers';
@@ -55,11 +55,7 @@ function App() {
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [banner, setBanner] = useState<BannerState>({ enabled: false, text: '' });
-  const [loaderState, setLoaderState] = useState<'idle' | 'pending' | 'shown' | 'done'>('idle');
-  const showTimeoutRef = useRef<number | null>(null);
-  const hideTimeoutRef = useRef<number | null>(null);
-  const shownAtRef = useRef<number | null>(null);
-  const isBlockingLoading = authLoading || (user && orgLoading && !profile);
+  const [allowOnboarding, setAllowOnboarding] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -67,42 +63,14 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (loaderState === 'done') return;
-
-    if (isBlockingLoading) {
-      if (loaderState === 'idle') {
-        setLoaderState('pending');
-        showTimeoutRef.current = window.setTimeout(() => {
-          shownAtRef.current = Date.now();
-          setLoaderState('shown');
-        }, 300);
-      }
+    if (authLoading || user) {
+      setAllowOnboarding(false);
       return;
     }
 
-    if (loaderState === 'pending') {
-      if (showTimeoutRef.current) {
-        clearTimeout(showTimeoutRef.current);
-        showTimeoutRef.current = null;
-      }
-      setLoaderState('done');
-      return;
-    }
-
-    if (loaderState === 'shown') {
-      const shownAt = shownAtRef.current ?? Date.now();
-      const elapsed = Date.now() - shownAt;
-      const remaining = Math.max(0, 500 - elapsed);
-      hideTimeoutRef.current = window.setTimeout(() => {
-        setLoaderState('done');
-      }, remaining);
-    }
-
-    return () => {
-      if (showTimeoutRef.current) clearTimeout(showTimeoutRef.current);
-      if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
-    };
-  }, [isBlockingLoading, loaderState]);
+    const timeout = window.setTimeout(() => setAllowOnboarding(true), 350);
+    return () => clearTimeout(timeout);
+  }, [authLoading, user]);
 
   useEffect(() => {
     try {
@@ -320,17 +288,6 @@ function App() {
 
   const isPublicRoute = view.type === 'redirect' || view.type === 'secret' || view.type === 'paste' || view.type === 'paste-list';
 
-  if (loaderState === 'shown') {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="rounded-full h-12 w-12 border-2 border-blue-500/60 mx-auto mb-4"></div>
-          <p className="text-slate-400">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (view.type === 'projects-center') {
     return <ProjectsCenterApp onOpenProject={(id) => navigateTo(`/projects/${id}`)} />;
   }
@@ -350,11 +307,11 @@ function App() {
     );
   }
 
-  if (!user) {
+  if (!user && allowOnboarding) {
     return <Onboarding />;
   }
 
-  if (!profile?.org_id) {
+  if (user && !authLoading && profile && !profile.org_id) {
     return <OrgSetup />;
   }
 
