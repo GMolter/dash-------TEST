@@ -394,7 +394,7 @@ export function ProjectDashboard({
 
               <div className="min-w-0">
                 <div className="text-lg font-semibold truncate">{project?.name || 'Project'}</div>
-                <div className="text-sm text-slate-300 flex items-center gap-3">
+                <div className="text-sm text-slate-300 flex flex-wrap items-center gap-2 sm:gap-3">
                   <span
                     className={`px-2.5 py-1 rounded-2xl border text-xs ${statusPill(
                       project?.status || 'planning',
@@ -402,7 +402,7 @@ export function ProjectDashboard({
                   >
                     {clampStatus(project?.status || 'planning')}
                   </span>
-                  <span className="text-slate-400">Updated {formatRelative(project?.updated_at)}</span>
+                  <span className="text-slate-400 whitespace-nowrap">Updated {formatRelative(project?.updated_at)}</span>
                 </div>
               </div>
             </div>
@@ -500,7 +500,7 @@ export function ProjectDashboard({
                     </button>
                   </div>
 
-                  <div className="mt-4 flex items-center gap-2">
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
                     <button
                       onClick={() => {
                         setNameModalMode('folder');
@@ -526,7 +526,7 @@ export function ProjectDashboard({
                       <span className="text-sm">Doc</span>
                     </button>
 
-                    <label className="ml-auto inline-flex items-center gap-2 px-3 py-2 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45 cursor-pointer">
+                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45 cursor-pointer lg:ml-auto">
                       <span className="text-sm">Upload</span>
                       <input
                         type="file"
@@ -582,7 +582,7 @@ export function ProjectDashboard({
               {tab === 'resources' && projectId && <ResourcesView projectId={projectId} />}
 
               {tab === 'files' && (
-                <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-6 min-h-[520px]">
+                <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-6 min-h-[380px] sm:min-h-[520px]">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="text-2xl font-semibold">Files</div>

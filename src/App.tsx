@@ -46,6 +46,9 @@ function App() {
   const [view, setView] = useState<View>({ type: 'home' });
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     try {
+      if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+        return false;
+      }
       const saved = localStorage.getItem('sidebarOpen');
       return saved === null ? true : saved === 'true';
     } catch {
@@ -316,15 +319,15 @@ function App() {
   }
 
   return (
-    <div className="h-screen text-white relative overflow-hidden">
+    <div className="min-h-screen text-white relative overflow-hidden">
       <AnimatedBackground />
-      <div className="relative z-10 h-full flex flex-col">
+      <div className="relative z-10 min-h-screen flex flex-col">
         <header className="relative z-20 border-b border-slate-800/50 bg-slate-950/80 backdrop-blur">
-          <div className="px-10 py-7 flex items-start justify-between">
-            <div className="flex items-start gap-8">
+          <div className="px-4 sm:px-6 lg:px-10 py-4 sm:py-6 lg:py-7 flex items-start justify-between">
+            <div className="flex items-start gap-4 sm:gap-6 lg:gap-8">
               <button
                 onClick={toggleSidebar}
-                className="p-4 hover:bg-slate-800/50 bg-slate-900/30 border border-slate-800/60 rounded-2xl transition-colors"
+                className="p-3 sm:p-4 hover:bg-slate-800/50 bg-slate-900/30 border border-slate-800/60 rounded-2xl transition-colors"
                 aria-label="Toggle menu"
               >
                 {sidebarOpen ? <X className="w-7 h-7" /> : <Menu className="w-7 h-7" />}
@@ -351,7 +354,7 @@ function App() {
         </header>
 
         {banner.enabled && banner.text?.trim() && (
-          <div className="relative z-20 px-10 pt-5">
+          <div className="relative z-20 px-4 sm:px-6 lg:px-10 pt-4 sm:pt-5">
             <div className="rounded-3xl border border-amber-500/25 bg-amber-500/12 backdrop-blur px-6 py-5 flex items-start gap-4">
               <div className="h-11 w-11 rounded-2xl border border-amber-500/25 bg-amber-500/12 flex items-center justify-center flex-none">
                 <AlertTriangle className="w-5 h-5 text-amber-200" />
@@ -363,9 +366,9 @@ function App() {
           </div>
         )}
 
-        <div className="relative z-10 flex flex-1 min-h-0">
+        <div className="relative z-10 flex flex-1 min-h-0 flex-col lg:flex-row">
           {sidebarOpen && (
-            <aside className="w-72 border-r border-slate-800/50 bg-slate-950/40 backdrop-blur">
+            <aside className="w-full lg:w-72 border-b lg:border-b-0 lg:border-r border-slate-800/50 bg-slate-950/40 backdrop-blur">
               <nav className="p-5 space-y-3">
                 {navItems.map((item) => {
                   const active =
@@ -394,7 +397,7 @@ function App() {
             </aside>
           )}
 
-          <main className="flex-1 p-10 overflow-y-auto">
+          <main className="flex-1 p-4 sm:p-6 lg:p-10 overflow-y-auto">
             {view.type === 'home' && renderHome()}
             {view.type === 'utilities' && renderUtilities()}
             {view.type === 'tool' && renderUtilities()}

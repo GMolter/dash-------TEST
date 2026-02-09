@@ -638,10 +638,12 @@ export function ProjectsCenterApp({
                           <div className="mt-1 text-sm text-slate-500">No description</div>
                         )}
                       </div>
-                      <div className={`shrink-0 px-3 py-1 rounded-2xl border text-xs ${statusPill(st)}`}>{st}</div>
+                      <div className={`shrink-0 px-3 py-1 rounded-2xl border text-xs whitespace-nowrap ${statusPill(st)}`}>
+                        {st}
+                      </div>
                     </div>
 
-                    <div className="mt-4 flex items-center gap-3 text-sm">
+                    <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
                       <div className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-slate-900/30 border border-slate-800/60">
                         <LayoutGrid className="w-4 h-4 text-slate-300" />
                         <span className="text-slate-200">Progress</span>
@@ -910,10 +912,10 @@ function Modal({
   widthClass?: string;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
       <button className="absolute inset-0 bg-black/55" onClick={onClose} aria-label="Close" />
       <div
-        className={`relative ${widthClass} rounded-3xl border border-slate-800/60 bg-slate-950/90 backdrop-blur p-6 shadow-2xl`}
+        className={`relative ${widthClass} rounded-3xl border border-slate-800/60 bg-slate-950/90 backdrop-blur p-4 sm:p-6 shadow-2xl max-h-[92vh] overflow-y-auto`}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
