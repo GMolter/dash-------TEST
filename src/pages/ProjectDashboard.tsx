@@ -10,6 +10,7 @@ import {
   Search,
   Settings,
   Plus,
+  X,
 } from 'lucide-react';
 import { AnimatedBackground } from '../components/AnimatedBackground';
 import { PlannerView } from '../components/PlannerView';
@@ -42,6 +43,8 @@ type Project = {
   name: string;
   description: string;
   status: string;
+  tags?: string[] | null;
+  created_at?: string;
   updated_at: string;
 };
 
@@ -112,6 +115,17 @@ export function ProjectDashboard({
 
   // Project search (top)
   const [projectSearch, setProjectSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchIndex, setSearchIndex] = useState(0);
+  const [searchProjects, setSearchProjects] = useState<Project[]>([]);
+
+  // Project settings modal
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsName, setSettingsName] = useState('');
+  const [settingsDescription, setSettingsDescription] = useState('');
+  const [settingsStatus, setSettingsStatus] = useState('planning');
 
   // Files state
   const [nodes, setNodes] = useState<FileNode[]>([]);
@@ -177,6 +191,28 @@ export function ProjectDashboard({
     }
   }
 
+  async function loadSearchProjects() {
+    if (!user) {
+      setSearchProjects([]);
+      return;
+    }
+
+    try {
+      let query = supabase.from('projects').select('*').order('updated_at', { ascending: false });
+
+      if (organization?.id) {
+        query = query.or(`org_id.eq.${organization.id},user_id.eq.${user.id}`);
+      } else {
+        query = query.eq('user_id', user.id);
+      }
+
+      const { data } = await query;
+      setSearchProjects((data as Project[]) || []);
+    } catch {
+      setSearchProjects([]);
+    }
+  }
+
   async function loadFiles() {
     if (!projectId) return;
     setFilesLoading(true);
@@ -202,6 +238,11 @@ export function ProjectDashboard({
   }, [projectId, organization?.id, user?.id]);
 
   useEffect(() => {
+    loadSearchProjects();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organization?.id, user?.id]);
+
+  useEffect(() => {
     if (!project?.id) return;
     loadFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -214,6 +255,8 @@ export function ProjectDashboard({
 
   useEffect(() => {
     setProjectSearch('');
+    setSearchOpen(false);
+    setSearchIndex(0);
   }, [projectId]);
 
   // Tab changes
@@ -245,6 +288,8 @@ export function ProjectDashboard({
       if (e.key === 'Escape') {
         setQcOpen(false);
         setCtx(null);
+        setSearchOpen(false);
+        setSettingsOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -255,6 +300,76 @@ export function ProjectDashboard({
     () => nodes.find((n) => n.id === selectedId && n.type === 'doc') || null,
     [nodes, selectedId],
   );
+
+  const searchResults = useMemo(() => {
+    const q = projectSearch.trim().toLowerCase();
+    if (!q) return [];
+    return searchProjects
+      .filter((p) => {
+        const hay = `${p.name} ${p.description || ''} ${((p.tags || []) as string[]).join(' ')}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .slice(0, 8);
+  }, [projectSearch, searchProjects]);
+
+  useEffect(() => {
+    if (!projectSearch.trim()) {
+      setSearchOpen(false);
+      setSearchIndex(0);
+    } else {
+      setSearchIndex(0);
+    }
+  }, [projectSearch]);
+
+  useEffect(() => {
+    if (!searchResults.length) {
+      setSearchIndex(0);
+      return;
+    }
+    setSearchIndex((i) => Math.min(i, Math.max(0, searchResults.length - 1)));
+  }, [searchResults.length]);
+
+  useEffect(() => {
+    if (!settingsOpen || !project) return;
+    setSettingsError(null);
+    setSettingsName(project.name || '');
+    setSettingsDescription(project.description || '');
+    setSettingsStatus(clampStatus(project.status || 'planning'));
+  }, [settingsOpen, project]);
+
+  async function saveProjectSettings() {
+    if (!projectId || !project) return;
+    const trimmedName = settingsName.trim();
+    if (!trimmedName) {
+      setSettingsError('Project name is required.');
+      return;
+    }
+
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .update({
+          name: trimmedName,
+          description: settingsDescription.trim(),
+          status: clampStatus(settingsStatus),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', projectId)
+        .select('*')
+        .single();
+      if (error) throw error;
+
+      setProject(data as Project);
+      setSettingsOpen(false);
+      await loadSearchProjects();
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : 'Failed to save project settings.');
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
 
   async function onCreate(name: string) {
     if (!projectId) return;
@@ -413,13 +528,71 @@ export function ProjectDashboard({
                 <input
                   ref={projectSearchRef}
                   value={projectSearch}
-                  onChange={(e) => setProjectSearch(e.target.value)}
-                  placeholder="Search within this project…"
+                  onChange={(e) => {
+                    setProjectSearch(e.target.value);
+                    setSearchOpen(true);
+                  }}
+                  onFocus={() => setSearchOpen(!!projectSearch.trim())}
+                  onBlur={() => {
+                    window.setTimeout(() => setSearchOpen(false), 150);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!searchResults.length) return;
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setSearchOpen(true);
+                      setSearchIndex((i) => Math.min(i + 1, searchResults.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setSearchOpen(true);
+                      setSearchIndex((i) => Math.max(i - 1, 0));
+                    } else if (e.key === 'Enter') {
+                      e.preventDefault();
+                      const chosen = searchResults[searchIndex];
+                      if (chosen) {
+                        setSearchOpen(false);
+                        navigateTo(`/projects/${chosen.id}`);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setSearchOpen(false);
+                    }
+                  }}
+                  placeholder="Search projects..."
                   className="w-full pl-12 pr-16 py-3 rounded-2xl bg-slate-950/50 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                 />
                 <div className="hidden sm:block absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 border border-slate-700/70 rounded-xl px-2.5 py-1">
                   Ctrl K
                 </div>
+                {searchOpen && searchResults.length > 0 && (
+                  <div className="absolute left-0 right-0 mt-2 z-20 rounded-2xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-xl overflow-hidden">
+                    {searchResults.map((p, idx) => {
+                      const active = idx === searchIndex;
+                      return (
+                        <button
+                          key={p.id}
+                          onMouseEnter={() => setSearchIndex(idx)}
+                          onClick={() => {
+                            setSearchOpen(false);
+                            navigateTo(`/projects/${p.id}`);
+                          }}
+                          className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 transition-colors ${
+                            active ? 'bg-slate-900/60' : 'hover:bg-slate-900/40'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold truncate">{p.name}</div>
+                            <div className="text-xs text-slate-400 truncate">
+                              {p.description || 'No description'}
+                            </div>
+                          </div>
+                          <div className="text-xs text-slate-400 whitespace-nowrap">
+                            {formatRelative(p.updated_at || p.created_at)}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -438,7 +611,7 @@ export function ProjectDashboard({
                   <button
                     className="mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
                     onClick={() => {
-                      /* project settings later */
+                      setSettingsOpen(true);
                     }}
                   >
                     <Settings className="w-4 h-4" />
@@ -669,6 +842,94 @@ export function ProjectDashboard({
         items={ctxItems}
         onClose={() => setCtx(null)}
       />
+
+      {settingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+          <button
+            className="absolute inset-0 bg-black/55"
+            onClick={() => setSettingsOpen(false)}
+            aria-label="Close"
+          />
+          <div className="relative w-[760px] max-w-[92vw] rounded-3xl border border-slate-800/60 bg-slate-950/90 backdrop-blur p-4 sm:p-6 shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xl font-semibold">Project settings</div>
+                <div className="mt-1 text-slate-300">Manage details for this project.</div>
+              </div>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="p-2 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="text-sm text-slate-300 mb-2">Project name</div>
+                <input
+                  value={settingsName}
+                  onChange={(e) => setSettingsName(e.target.value)}
+                  placeholder="Project name"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                />
+              </div>
+              <div>
+                <div className="text-sm text-slate-300 mb-2">Status</div>
+                <select
+                  value={settingsStatus}
+                  onChange={(e) => setSettingsStatus(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-slate-800/60 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                >
+                  <option value="planning">Planning</option>
+                  <option value="active">Active</option>
+                  <option value="review">Review</option>
+                  <option value="completed">Completed</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <div className="text-sm text-slate-300 mb-2">Description</div>
+              <textarea
+                value={settingsDescription}
+                onChange={(e) => setSettingsDescription(e.target.value)}
+                placeholder="What is this project about?"
+                rows={5}
+                className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40 resize-none"
+              />
+            </div>
+
+            {settingsError && (
+              <div className="mt-4 p-3 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 text-sm">
+                {settingsError}
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="px-4 py-3 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveProjectSettings}
+                disabled={settingsSaving || !settingsName.trim()}
+                className={`px-4 py-3 rounded-2xl border transition-colors ${
+                  settingsName.trim() && !settingsSaving
+                    ? 'bg-blue-500/20 border-blue-500/30 text-blue-200 hover:bg-blue-500/25'
+                    : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                {settingsSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
