@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useOrg } from '../hooks/useOrg';
 import { usePermission } from '../hooks/usePermission';
-import { User, LogOut, Building2, AlertTriangle } from 'lucide-react';
+import { User, LogOut, Building2, AlertTriangle, ExternalLink } from 'lucide-react';
 
 export function ProfileSettings() {
   const { user, signOut } = useAuth();
@@ -52,11 +52,20 @@ export function ProfileSettings() {
   return (
     <div className="max-w-2xl mx-auto">
       <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl p-6 border border-slate-700 space-y-6">
-        <div>
+        <div className="flex items-start justify-between gap-4">
           <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
             <User className="w-6 h-6" />
             Profile Settings
           </h2>
+          <a
+            href="/help"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-900/40 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-800/60 hover:text-white transition-colors"
+          >
+            Help
+            <ExternalLink className="w-4 h-4" />
+          </a>
         </div>
 
         <div className="border-t border-slate-700 pt-6">

@@ -19,6 +19,7 @@ import { Onboarding } from './pages/Onboarding';
 import { OrgSetup } from './pages/OrgSetup';
 import { OrganizationPage } from './pages/OrganizationPage';
 import { ProfileSettings } from './pages/ProfileSettings';
+import { HelpPage } from './pages/HelpPage';
 import { useAuth } from './hooks/useAuth';
 import { useOrg } from './hooks/useOrg';
 import { Home, Wrench, Menu, X, AlertTriangle, Building2, UserCircle } from 'lucide-react';
@@ -29,6 +30,7 @@ type View =
   | { type: 'admin' }
   | { type: 'organization' }
   | { type: 'profile' }
+  | { type: 'help' }
   | { type: 'tool'; tool: string }
   | { type: 'redirect'; code: string }
   | { type: 'secret'; code: string }
@@ -147,6 +149,11 @@ function App() {
         return;
       }
 
+      if (cleanPath === '/help') {
+        setView({ type: 'help' });
+        return;
+      }
+
       if (cleanPath === '/utilities') {
         setView({ type: 'utilities' });
         if (window.location.pathname !== '/') window.history.replaceState({}, '', '/');
@@ -188,7 +195,7 @@ function App() {
       }
 
       const maybeCode = cleanPath.replace(/^\//, '');
-      if (maybeCode && !['home', 'admin', 'utilities', 'p', 'pastes', 'projects', 'organization', 'profile'].includes(maybeCode)) {
+      if (maybeCode && !['home', 'admin', 'utilities', 'p', 'pastes', 'projects', 'organization', 'profile', 'help'].includes(maybeCode)) {
         setView({ type: 'redirect', code: maybeCode });
         return;
       }
@@ -403,6 +410,7 @@ function App() {
             {view.type === 'tool' && renderUtilities()}
             {view.type === 'organization' && <OrganizationPage />}
             {view.type === 'profile' && <ProfileSettings />}
+            {view.type === 'help' && <HelpPage />}
             {view.type === 'admin' && <Admin />}
             {view.type === 'tool' && view.tool === 'notfound' && <NotFound />}
           </main>
