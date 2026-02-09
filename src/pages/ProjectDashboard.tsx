@@ -118,6 +118,7 @@ export function ProjectDashboard({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchIndex, setSearchIndex] = useState(0);
   const [searchProjects, setSearchProjects] = useState<Project[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Project settings modal
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -126,6 +127,10 @@ export function ProjectDashboard({
   const [settingsName, setSettingsName] = useState('');
   const [settingsDescription, setSettingsDescription] = useState('');
   const [settingsStatus, setSettingsStatus] = useState('planning');
+  const [deleteNameInput, setDeleteNameInput] = useState('');
+  const [deleteConfirmChecked, setDeleteConfirmChecked] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
 
   // Files state
   const [nodes, setNodes] = useState<FileNode[]>([]);
@@ -197,6 +202,7 @@ export function ProjectDashboard({
       return;
     }
 
+    setSearchLoading(true);
     try {
       let query = supabase.from('projects').select('*').order('updated_at', { ascending: false });
 
@@ -210,6 +216,8 @@ export function ProjectDashboard({
       setSearchProjects((data as Project[]) || []);
     } catch {
       setSearchProjects([]);
+    } finally {
+      setSearchLoading(false);
     }
   }
 
@@ -330,11 +338,21 @@ export function ProjectDashboard({
   }, [searchResults.length]);
 
   useEffect(() => {
+    if (!projectSearch.trim()) return;
+    if (searchProjects.length || searchLoading) return;
+    loadSearchProjects();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectSearch, searchProjects.length, searchLoading]);
+
+  useEffect(() => {
     if (!settingsOpen || !project) return;
     setSettingsError(null);
     setSettingsName(project.name || '');
     setSettingsDescription(project.description || '');
     setSettingsStatus(clampStatus(project.status || 'planning'));
+    setDeleteNameInput('');
+    setDeleteConfirmChecked(false);
+    setDeleteError(null);
   }, [settingsOpen, project]);
 
   async function saveProjectSettings() {
@@ -368,6 +386,33 @@ export function ProjectDashboard({
       setSettingsError(err instanceof Error ? err.message : 'Failed to save project settings.');
     } finally {
       setSettingsSaving(false);
+    }
+  }
+
+  async function deleteProject() {
+    if (!projectId || !project) return;
+
+    if (deleteNameInput.trim() !== project.name) {
+      setDeleteError('Project name does not match.');
+      return;
+    }
+
+    if (!deleteConfirmChecked) {
+      setDeleteError('Please confirm that this action cannot be undone.');
+      return;
+    }
+
+    setDeletingProject(true);
+    setDeleteError(null);
+    try {
+      const { error } = await supabase.from('projects').delete().eq('id', projectId);
+      if (error) throw error;
+      setSettingsOpen(false);
+      navigateTo('/projects');
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete project.');
+    } finally {
+      setDeletingProject(false);
     }
   }
 
@@ -532,7 +577,10 @@ export function ProjectDashboard({
                     setProjectSearch(e.target.value);
                     setSearchOpen(true);
                   }}
-                  onFocus={() => setSearchOpen(!!projectSearch.trim())}
+                  onFocus={() => {
+                    loadSearchProjects();
+                    setSearchOpen(!!projectSearch.trim());
+                  }}
                   onBlur={() => {
                     window.setTimeout(() => setSearchOpen(false), 150);
                   }}
@@ -563,34 +611,40 @@ export function ProjectDashboard({
                 <div className="hidden sm:block absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 border border-slate-700/70 rounded-xl px-2.5 py-1">
                   Ctrl K
                 </div>
-                {searchOpen && searchResults.length > 0 && (
+                {searchOpen && !!projectSearch.trim() && (
                   <div className="absolute left-0 right-0 mt-2 z-20 rounded-2xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-xl overflow-hidden">
-                    {searchResults.map((p, idx) => {
-                      const active = idx === searchIndex;
-                      return (
-                        <button
-                          key={p.id}
-                          onMouseEnter={() => setSearchIndex(idx)}
-                          onClick={() => {
-                            setSearchOpen(false);
-                            navigateTo(`/projects/${p.id}`);
-                          }}
-                          className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 transition-colors ${
-                            active ? 'bg-slate-900/60' : 'hover:bg-slate-900/40'
-                          }`}
-                        >
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold truncate">{p.name}</div>
-                            <div className="text-xs text-slate-400 truncate">
-                              {p.description || 'No description'}
+                    {searchLoading ? (
+                      <div className="px-4 py-3 text-sm text-slate-300">Searching projects...</div>
+                    ) : searchResults.length > 0 ? (
+                      searchResults.map((p, idx) => {
+                        const active = idx === searchIndex;
+                        return (
+                          <button
+                            key={p.id}
+                            onMouseEnter={() => setSearchIndex(idx)}
+                            onClick={() => {
+                              setSearchOpen(false);
+                              navigateTo(`/projects/${p.id}`);
+                            }}
+                            className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 transition-colors ${
+                              active ? 'bg-slate-900/60' : 'hover:bg-slate-900/40'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold truncate">{p.name}</div>
+                              <div className="text-xs text-slate-400 truncate">
+                                {p.description || 'No description'}
+                              </div>
                             </div>
-                          </div>
-                          <div className="text-xs text-slate-400 whitespace-nowrap">
-                            {formatRelative(p.updated_at || p.created_at)}
-                          </div>
-                        </button>
-                      );
-                    })}
+                            <div className="text-xs text-slate-400 whitespace-nowrap">
+                              {formatRelative(p.updated_at || p.created_at)}
+                            </div>
+                          </button>
+                        );
+                      })
+                    ) : (
+                      <div className="px-4 py-3 text-sm text-slate-400">No matching projects.</div>
+                    )}
                   </div>
                 )}
               </div>
@@ -926,6 +980,67 @@ export function ProjectDashboard({
               >
                 {settingsSaving ? 'Saving...' : 'Save Changes'}
               </button>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-slate-800/60">
+              <div className="text-sm font-semibold text-red-200">Danger zone</div>
+              <div className="mt-1 text-sm text-slate-400">
+                Delete this project permanently. This action cannot be undone.
+              </div>
+
+              <div className="mt-4">
+                <div className="text-sm text-slate-300 mb-2">
+                  Type <span className="font-semibold text-slate-100">{project.name}</span> to confirm
+                </div>
+                <input
+                  value={deleteNameInput}
+                  onChange={(e) => {
+                    setDeleteNameInput(e.target.value);
+                    setDeleteError(null);
+                  }}
+                  placeholder="Enter project name to confirm"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500/30"
+                />
+              </div>
+
+              <label className="mt-4 inline-flex items-start gap-3 text-sm text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={deleteConfirmChecked}
+                  onChange={(e) => {
+                    setDeleteConfirmChecked(e.target.checked);
+                    setDeleteError(null);
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-900 text-red-500 focus:ring-red-500/40"
+                />
+                <span>I understand this action cannot be undone.</span>
+              </label>
+
+              {deleteError && (
+                <div className="mt-4 p-3 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 text-sm">
+                  {deleteError}
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-end">
+                <button
+                  onClick={deleteProject}
+                  disabled={
+                    deletingProject ||
+                    deleteNameInput.trim() !== project.name ||
+                    !deleteConfirmChecked
+                  }
+                  className={`px-4 py-3 rounded-2xl border transition-colors ${
+                    !deletingProject &&
+                    deleteNameInput.trim() === project.name &&
+                    deleteConfirmChecked
+                      ? 'bg-red-500/20 border-red-500/40 text-red-200 hover:bg-red-500/25'
+                      : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  {deletingProject ? 'Deleting...' : 'Delete Project'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
