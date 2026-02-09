@@ -55,6 +55,53 @@ type SearchAction = {
   run: () => void;
 };
 
+type FolderChoice = {
+  id: string | null;
+  depth: number;
+  name: string;
+  path: string;
+};
+
+function formatQuickNoteName() {
+  const d = new Date();
+  const time = d
+    .toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    .replace(/\s/g, '')
+    .toLowerCase();
+  const date = d.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' });
+  return `Quick Note ${time} ${date}`;
+}
+
+function buildFolderChoices(nodes: FileNode[]): FolderChoice[] {
+  const folders = nodes.filter((n) => n.type === 'folder');
+  const byParent = new Map<string | null, FileNode[]>();
+
+  for (const folder of folders) {
+    const key = folder.parent_id || null;
+    const list = byParent.get(key) || [];
+    list.push(folder);
+    byParent.set(key, list);
+  }
+
+  for (const list of byParent.values()) {
+    list.sort((a, b) => a.sort_index - b.sort_index || a.name.localeCompare(b.name));
+  }
+
+  const out: FolderChoice[] = [{ id: null, depth: 0, name: 'Root', path: '/' }];
+
+  const walk = (parentId: string | null, depth: number, parentPath: string) => {
+    const children = byParent.get(parentId) || [];
+    for (const child of children) {
+      const path = parentPath === '/' ? `/${child.name}` : `${parentPath}/${child.name}`;
+      out.push({ id: child.id, depth, name: child.name, path });
+      walk(child.id, depth + 1, path);
+    }
+  };
+
+  walk(null, 1, '/');
+  return out;
+}
+
 function clampStatus(s: string) {
   const v = (s || '').toLowerCase();
   if (['planning', 'active', 'review', 'completed', 'archived'].includes(v)) return v;
@@ -127,6 +174,7 @@ export function ProjectDashboard({
 
   // Project settings modal
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsName, setSettingsName] = useState('');
@@ -154,6 +202,23 @@ export function ProjectDashboard({
   // Quick capture
   const [qcOpen, setQcOpen] = useState(false);
   const qcWrapRef = useRef<HTMLDivElement | null>(null);
+  const [quickNoteModalOpen, setQuickNoteModalOpen] = useState(false);
+  const [quickNoteName, setQuickNoteName] = useState('');
+  const [quickNoteFolderId, setQuickNoteFolderId] = useState<string | null>(null);
+  const [quickNoteFolderName, setQuickNoteFolderName] = useState('');
+  const [quickNoteError, setQuickNoteError] = useState<string | null>(null);
+  const [quickNoteCreating, setQuickNoteCreating] = useState(false);
+  const [quickNoteCreatingFolder, setQuickNoteCreatingFolder] = useState(false);
+
+  const [quickLinkModalOpen, setQuickLinkModalOpen] = useState(false);
+  const [quickLinkUrl, setQuickLinkUrl] = useState('');
+  const [quickLinkTitle, setQuickLinkTitle] = useState('');
+  const [quickLinkDescription, setQuickLinkDescription] = useState('');
+  const [quickLinkSaving, setQuickLinkSaving] = useState(false);
+  const [quickLinkError, setQuickLinkError] = useState<string | null>(null);
+
+  const [plannerFocusSignal, setPlannerFocusSignal] = useState(0);
+  const [highlightResourceId, setHighlightResourceId] = useState<string | null>(null);
 
   async function loadProject() {
     if (!projectId) {
@@ -273,6 +338,9 @@ export function ProjectDashboard({
         setCtx(null);
         setSearchOpen(false);
         setSettingsOpen(false);
+        setDeleteModalOpen(false);
+        setQuickNoteModalOpen(false);
+        setQuickLinkModalOpen(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -284,8 +352,122 @@ export function ProjectDashboard({
     [nodes, selectedId],
   );
 
-  const actionItems = useMemo<SearchAction[]>(
-    () => [
+  const folderChoices = useMemo(() => buildFolderChoices(nodes), [nodes]);
+  const selectedQuickNotePath = useMemo(() => {
+    const chosen = folderChoices.find((f) => f.id === quickNoteFolderId);
+    return chosen?.path || '/';
+  }, [folderChoices, quickNoteFolderId]);
+
+  async function openQuickNoteModal() {
+    if (!projectId) return;
+
+    const existing = nodes.find(
+      (n) => n.type === 'folder' && n.parent_id === null && n.name.trim().toLowerCase() === 'quick notes',
+    );
+    let targetFolderId = existing?.id || null;
+
+    if (!targetFolderId) {
+      try {
+        const created = await createFolder(projectId, 'Quick Notes', null);
+        targetFolderId = created.id;
+        await loadFiles();
+      } catch (err) {
+        setQuickNoteError(err instanceof Error ? err.message : 'Failed to create Quick Notes folder.');
+        return;
+      }
+    }
+
+    setQuickNoteError(null);
+    setQuickNoteFolderName('');
+    setQuickNoteFolderId(targetFolderId);
+    setQuickNoteName(formatQuickNoteName());
+    setQuickNoteModalOpen(true);
+  }
+
+  async function createQuickNoteFolder() {
+    if (!projectId) return;
+    const name = quickNoteFolderName.trim();
+    if (!name) return;
+
+    setQuickNoteCreatingFolder(true);
+    setQuickNoteError(null);
+    try {
+      const created = await createFolder(projectId, name, quickNoteFolderId);
+      setQuickNoteFolderName('');
+      setQuickNoteFolderId(created.id);
+      await loadFiles();
+    } catch (err) {
+      setQuickNoteError(err instanceof Error ? err.message : 'Failed to create folder.');
+    } finally {
+      setQuickNoteCreatingFolder(false);
+    }
+  }
+
+  async function createQuickNoteDoc() {
+    if (!projectId) return;
+    const name = quickNoteName.trim();
+    if (!name) {
+      setQuickNoteError('Quick note name is required.');
+      return;
+    }
+
+    setQuickNoteCreating(true);
+    setQuickNoteError(null);
+    try {
+      const doc = await createDoc(projectId, name, quickNoteFolderId);
+      setQuickNoteModalOpen(false);
+      setQcOpen(false);
+      setTab('files');
+      setBranchOpen(true);
+      await loadFiles();
+      setSelectedId(doc?.id || null);
+    } catch (err) {
+      setQuickNoteError(err instanceof Error ? err.message : 'Failed to create quick note.');
+    } finally {
+      setQuickNoteCreating(false);
+    }
+  }
+
+  async function createQuickLinkResource() {
+    if (!projectId) return;
+    const url = quickLinkUrl.trim();
+    if (!url) {
+      setQuickLinkError('Link is required.');
+      return;
+    }
+
+    setQuickLinkSaving(true);
+    setQuickLinkError(null);
+    try {
+      const { data, error } = await supabase
+        .from('project_resources')
+        .insert({
+          project_id: projectId,
+          url,
+          title: quickLinkTitle.trim(),
+          description: quickLinkDescription.trim(),
+          category: 'quick_links',
+          position: Date.now(),
+        })
+        .select('*')
+        .single();
+      if (error) throw error;
+
+      setQuickLinkModalOpen(false);
+      setQcOpen(false);
+      setQuickLinkUrl('');
+      setQuickLinkTitle('');
+      setQuickLinkDescription('');
+      setTab('resources');
+      setHighlightResourceId((data as { id: string }).id);
+    } catch (err) {
+      setQuickLinkError(err instanceof Error ? err.message : 'Failed to create quick link.');
+    } finally {
+      setQuickLinkSaving(false);
+    }
+  }
+
+  const actionItems: SearchAction[] = [
       {
         id: 'open-settings',
         label: 'Open Settings',
@@ -329,7 +511,10 @@ export function ProjectDashboard({
         id: 'create-task',
         label: 'Create New Task',
         hint: 'Planner',
-        run: () => setTab('planner'),
+        run: () => {
+          setTab('planner');
+          setPlannerFocusSignal((v) => v + 1);
+        },
       },
       {
         id: 'create-document',
@@ -358,22 +543,36 @@ export function ProjectDashboard({
         },
       },
       {
-        id: 'open-quick-capture',
-        label: 'Open Quick Capture',
+        id: 'quick-note',
+        label: 'Capture Quick Note',
         hint: 'Capture',
-        run: () => setQcOpen(true),
+        run: () => {
+          setQcOpen(false);
+          void openQuickNoteModal();
+        },
       },
-    ],
-    [],
-  );
+      {
+        id: 'quick-link',
+        label: 'Capture Quick Link',
+        hint: 'Capture',
+        run: () => {
+          setQcOpen(false);
+          setQuickLinkError(null);
+          setQuickLinkUrl('');
+          setQuickLinkTitle('');
+          setQuickLinkDescription('');
+          setQuickLinkModalOpen(true);
+        },
+      },
+    ];
 
-  const searchResults = useMemo(() => {
+  const searchResults = (() => {
     const q = projectSearch.trim().toLowerCase();
-    if (!q) return [];
+    if (!q) return [] as SearchAction[];
     return actionItems
       .filter((action) => `${action.label} ${action.hint}`.toLowerCase().includes(q))
       .slice(0, 10);
-  }, [actionItems, projectSearch]);
+  })();
 
   useEffect(() => {
     if (!projectSearch.trim()) {
@@ -398,10 +597,14 @@ export function ProjectDashboard({
     setSettingsName(project.name || '');
     setSettingsDescription(project.description || '');
     setSettingsStatus(clampStatus(project.status || 'planning'));
+  }, [settingsOpen, project]);
+
+  useEffect(() => {
+    if (!deleteModalOpen || !project) return;
     setDeleteNameInput('');
     setDeleteConfirmChecked(false);
     setDeleteError(null);
-  }, [settingsOpen, project]);
+  }, [deleteModalOpen, project]);
 
   async function saveProjectSettings() {
     if (!projectId || !project) return;
@@ -454,6 +657,7 @@ export function ProjectDashboard({
     try {
       const { error } = await supabase.from('projects').delete().eq('id', projectId);
       if (error) throw error;
+      setDeleteModalOpen(false);
       setSettingsOpen(false);
       navigateTo('/projects');
     } catch (err) {
@@ -842,8 +1046,16 @@ export function ProjectDashboard({
             >
               {tab === 'overview' && projectId && <OverviewView projectId={projectId} />}
               {tab === 'board' && projectId && <BoardView projectId={projectId} />}
-              {tab === 'planner' && projectId && <PlannerView projectId={projectId} />}
-              {tab === 'resources' && projectId && <ResourcesView projectId={projectId} />}
+              {tab === 'planner' && projectId && (
+                <PlannerView projectId={projectId} focusNewTaskSignal={plannerFocusSignal} />
+              )}
+              {tab === 'resources' && projectId && (
+                <ResourcesView
+                  projectId={projectId}
+                  highlightResourceId={highlightResourceId}
+                  onHighlightConsumed={() => setHighlightResourceId(null)}
+                />
+              )}
 
               {tab === 'files' && (
                 <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-6 min-h-[380px] sm:min-h-[520px]">
@@ -894,9 +1106,32 @@ export function ProjectDashboard({
         <div ref={qcWrapRef} className="fixed bottom-5 right-5 sm:bottom-8 sm:right-8 z-40">
           {qcOpen && (
             <div className="absolute bottom-full right-0 mb-3 w-52 rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl overflow-hidden">
-              <QCItem label="Quick Note" onClick={() => setQcOpen(false)} />
-              <QCItem label="Quick Task" onClick={() => setQcOpen(false)} />
-              <QCItem label="Quick Link" onClick={() => setQcOpen(false)} />
+              <QCItem
+                label="Quick Note"
+                onClick={() => {
+                  setQcOpen(false);
+                  void openQuickNoteModal();
+                }}
+              />
+              <QCItem
+                label="Quick Task"
+                onClick={() => {
+                  setQcOpen(false);
+                  setTab('planner');
+                  setPlannerFocusSignal((v) => v + 1);
+                }}
+              />
+              <QCItem
+                label="Quick Link"
+                onClick={() => {
+                  setQcOpen(false);
+                  setQuickLinkError(null);
+                  setQuickLinkUrl('');
+                  setQuickLinkTitle('');
+                  setQuickLinkDescription('');
+                  setQuickLinkModalOpen(true);
+                }}
+              />
             </div>
           )}
           <button
@@ -938,7 +1173,10 @@ export function ProjectDashboard({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
           <button
             className="absolute inset-0 bg-black/55"
-            onClick={() => setSettingsOpen(false)}
+            onClick={() => {
+              setDeleteModalOpen(false);
+              setSettingsOpen(false);
+            }}
             aria-label="Close"
           />
           <div className="relative w-[760px] max-w-[92vw] rounded-3xl border border-slate-800/60 bg-slate-950/90 backdrop-blur p-4 sm:p-6 shadow-2xl max-h-[92vh] overflow-y-auto">
@@ -948,7 +1186,10 @@ export function ProjectDashboard({
                 <div className="mt-1 text-slate-300">Manage details for this project.</div>
               </div>
               <button
-                onClick={() => setSettingsOpen(false)}
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setSettingsOpen(false);
+                }}
                 className="p-2 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
                 aria-label="Close"
               >
@@ -1001,7 +1242,10 @@ export function ProjectDashboard({
 
             <div className="mt-6 flex items-center justify-end gap-3">
               <button
-                onClick={() => setSettingsOpen(false)}
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setSettingsOpen(false);
+                }}
                 className="px-4 py-3 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
               >
                 Cancel
@@ -1020,64 +1264,303 @@ export function ProjectDashboard({
             </div>
 
             <div className="mt-8 pt-6 border-t border-slate-800/60">
-              <div className="text-sm font-semibold text-red-200">Danger zone</div>
-              <div className="mt-1 text-sm text-slate-400">
-                Delete this project permanently. This action cannot be undone.
+              <button
+                onClick={() => setDeleteModalOpen(true)}
+                className="px-4 py-3 rounded-2xl border border-red-500/35 bg-red-500/10 hover:bg-red-500/15 text-red-200 transition-colors"
+              >
+                Delete Project...
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
+          <button
+            className="absolute inset-0 bg-black/65"
+            onClick={() => setDeleteModalOpen(false)}
+            aria-label="Close"
+          />
+          <div className="relative w-[640px] max-w-[92vw] rounded-3xl border border-red-500/30 bg-slate-950/95 backdrop-blur p-4 sm:p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xl font-semibold text-red-200">Delete project</div>
+                <div className="mt-1 text-slate-300">
+                  This permanently deletes project data and cannot be undone.
+                </div>
+              </div>
+              <button
+                onClick={() => setDeleteModalOpen(false)}
+                className="p-2 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-5">
+              <div className="text-sm text-slate-300 mb-2">
+                Type <span className="font-semibold text-slate-100">{project.name}</span> to confirm
+              </div>
+              <input
+                value={deleteNameInput}
+                onChange={(e) => {
+                  setDeleteNameInput(e.target.value);
+                  setDeleteError(null);
+                }}
+                placeholder="Enter project name"
+                className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500/30"
+              />
+            </div>
+
+            <label className="mt-4 inline-flex items-start gap-3 text-sm text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={deleteConfirmChecked}
+                onChange={(e) => {
+                  setDeleteConfirmChecked(e.target.checked);
+                  setDeleteError(null);
+                }}
+                className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-900 text-red-500 focus:ring-red-500/40"
+              />
+              <span>I understand this action cannot be undone.</span>
+            </label>
+
+            {deleteError && (
+              <div className="mt-4 p-3 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 text-sm">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setDeleteModalOpen(false)}
+                className="px-4 py-3 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={deleteProject}
+                disabled={deletingProject || deleteNameInput.trim() !== project.name || !deleteConfirmChecked}
+                className={`px-4 py-3 rounded-2xl border transition-colors ${
+                  !deletingProject && deleteNameInput.trim() === project.name && deleteConfirmChecked
+                    ? 'bg-red-500/20 border-red-500/40 text-red-200 hover:bg-red-500/25'
+                    : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                {deletingProject ? 'Deleting...' : 'Delete Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {quickNoteModalOpen && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center p-4 sm:p-6">
+          <button
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setQuickNoteModalOpen(false)}
+            aria-label="Close"
+          />
+          <div className="relative w-[860px] max-w-[96vw] rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur p-4 sm:p-6 shadow-2xl max-h-[92vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xl font-semibold">Create quick note</div>
+                <div className="mt-1 text-slate-300">
+                  Choose where to save it, then open it immediately in Files.
+                </div>
+              </div>
+              <button
+                onClick={() => setQuickNoteModalOpen(false)}
+                className="p-2 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-950/45 p-4">
+                <div className="text-sm font-medium text-slate-200 mb-3">Choose folder</div>
+                <div className="max-h-[300px] overflow-auto rounded-xl border border-slate-800/60 bg-slate-950/35 p-2">
+                  {folderChoices.map((folder) => {
+                    const active = folder.id === quickNoteFolderId;
+                    return (
+                      <button
+                        key={folder.id || 'root'}
+                        onClick={() => setQuickNoteFolderId(folder.id)}
+                        className={`w-full text-left px-3 py-2 rounded-xl transition-colors ${
+                          active ? 'bg-blue-500/18 border border-blue-500/30 text-blue-200' : 'hover:bg-slate-900/45 text-slate-200'
+                        }`}
+                        style={{ paddingLeft: `${12 + folder.depth * 14}px` }}
+                      >
+                        {folder.name}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="mt-4">
-                <div className="text-sm text-slate-300 mb-2">
-                  Type <span className="font-semibold text-slate-100">{project.name}</span> to confirm
+              <div className="rounded-2xl border border-slate-800/60 bg-slate-950/45 p-4">
+                <div className="text-sm font-medium text-slate-200 mb-3">Create folder</div>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={quickNoteFolderName}
+                    onChange={(e) => {
+                      setQuickNoteFolderName(e.target.value);
+                      setQuickNoteError(null);
+                    }}
+                    placeholder="New folder name"
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-slate-950/60 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
+                  />
+                  <button
+                    onClick={createQuickNoteFolder}
+                    disabled={quickNoteCreatingFolder || !quickNoteFolderName.trim()}
+                    className={`px-3 py-2.5 rounded-xl border transition-colors ${
+                      quickNoteFolderName.trim() && !quickNoteCreatingFolder
+                        ? 'bg-blue-500/20 border-blue-500/30 text-blue-200 hover:bg-blue-500/25'
+                        : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
+                    }`}
+                  >
+                    {quickNoteCreatingFolder ? 'Creating...' : 'New Folder'}
+                  </button>
                 </div>
+
+                <div className="mt-4">
+                  <div className="text-sm text-slate-300 mb-2">File name</div>
+                  <input
+                    value={quickNoteName}
+                    onChange={(e) => {
+                      setQuickNoteName(e.target.value);
+                      setQuickNoteError(null);
+                    }}
+                    placeholder="Quick note name"
+                    className="w-full px-4 py-3 rounded-2xl bg-slate-950/60 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
+                  />
+                </div>
+
+                <div className="mt-3 text-sm text-slate-400">
+                  Save path: <span className="text-slate-200">{selectedQuickNotePath}</span>
+                </div>
+              </div>
+            </div>
+
+            {quickNoteError && (
+              <div className="mt-4 p-3 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 text-sm">
+                {quickNoteError}
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setQuickNoteModalOpen(false)}
+                className="px-4 py-3 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createQuickNoteDoc}
+                disabled={quickNoteCreating || !quickNoteName.trim()}
+                className={`px-4 py-3 rounded-2xl border transition-colors ${
+                  quickNoteName.trim() && !quickNoteCreating
+                    ? 'bg-blue-500/20 border-blue-500/30 text-blue-200 hover:bg-blue-500/25'
+                    : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                {quickNoteCreating ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {quickLinkModalOpen && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center p-4 sm:p-6">
+          <button
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setQuickLinkModalOpen(false)}
+            aria-label="Close"
+          />
+          <div className="relative w-[620px] max-w-[96vw] rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur p-4 sm:p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-xl font-semibold">Quick link</div>
+                <div className="mt-1 text-slate-300">Adds a resource in the Quick Links category.</div>
+              </div>
+              <button
+                onClick={() => setQuickLinkModalOpen(false)}
+                className="p-2 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <div className="text-sm text-slate-300 mb-2">Link</div>
                 <input
-                  value={deleteNameInput}
+                  value={quickLinkUrl}
                   onChange={(e) => {
-                    setDeleteNameInput(e.target.value);
-                    setDeleteError(null);
+                    setQuickLinkUrl(e.target.value);
+                    setQuickLinkError(null);
                   }}
-                  placeholder="Enter project name to confirm"
-                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/40 border border-red-500/25 focus:outline-none focus:ring-2 focus:ring-red-500/30"
+                  placeholder="https://..."
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/60 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
                 />
               </div>
-
-              <label className="mt-4 inline-flex items-start gap-3 text-sm text-slate-300 cursor-pointer">
+              <div>
+                <div className="text-sm text-slate-300 mb-2">Name (optional)</div>
                 <input
-                  type="checkbox"
-                  checked={deleteConfirmChecked}
+                  value={quickLinkTitle}
                   onChange={(e) => {
-                    setDeleteConfirmChecked(e.target.checked);
-                    setDeleteError(null);
+                    setQuickLinkTitle(e.target.value);
+                    setQuickLinkError(null);
                   }}
-                  className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-900 text-red-500 focus:ring-red-500/40"
+                  placeholder="Optional title"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/60 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
                 />
-                <span>I understand this action cannot be undone.</span>
-              </label>
-
-              {deleteError && (
-                <div className="mt-4 p-3 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 text-sm">
-                  {deleteError}
-                </div>
-              )}
-
-              <div className="mt-4 flex items-center justify-end">
-                <button
-                  onClick={deleteProject}
-                  disabled={
-                    deletingProject ||
-                    deleteNameInput.trim() !== project.name ||
-                    !deleteConfirmChecked
-                  }
-                  className={`px-4 py-3 rounded-2xl border transition-colors ${
-                    !deletingProject &&
-                    deleteNameInput.trim() === project.name &&
-                    deleteConfirmChecked
-                      ? 'bg-red-500/20 border-red-500/40 text-red-200 hover:bg-red-500/25'
-                      : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
-                  }`}
-                >
-                  {deletingProject ? 'Deleting...' : 'Delete Project'}
-                </button>
               </div>
+              <div>
+                <div className="text-sm text-slate-300 mb-2">Description (optional)</div>
+                <textarea
+                  value={quickLinkDescription}
+                  onChange={(e) => {
+                    setQuickLinkDescription(e.target.value);
+                    setQuickLinkError(null);
+                  }}
+                  rows={4}
+                  placeholder="Optional description"
+                  className="w-full px-4 py-3 rounded-2xl bg-slate-950/60 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
+                />
+              </div>
+            </div>
+
+            {quickLinkError && (
+              <div className="mt-4 p-3 rounded-2xl border border-red-500/30 bg-red-500/10 text-red-200 text-sm">
+                {quickLinkError}
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setQuickLinkModalOpen(false)}
+                className="px-4 py-3 rounded-2xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createQuickLinkResource}
+                disabled={quickLinkSaving || !quickLinkUrl.trim()}
+                className={`px-4 py-3 rounded-2xl border transition-colors ${
+                  quickLinkUrl.trim() && !quickLinkSaving
+                    ? 'bg-blue-500/20 border-blue-500/30 text-blue-200 hover:bg-blue-500/25'
+                    : 'bg-slate-900/20 border-slate-800/60 text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                {quickLinkSaving ? 'Adding...' : 'Create'}
+              </button>
             </div>
           </div>
         </div>

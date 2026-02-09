@@ -53,7 +53,7 @@ export async function ensureDefaultTree(projectId: string) {
     await createDoc(projectId, 'Additional Context', planning.id);
   }
 
-  await createDoc(projectId, 'Quick Notes', null);
+  await createFolder(projectId, 'Quick Notes', null);
   if (research) await createDoc(projectId, 'Notes', research.id);
 }
 
