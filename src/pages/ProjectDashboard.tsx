@@ -226,6 +226,7 @@ export function ProjectDashboard({
 
   const [plannerFocusSignal, setPlannerFocusSignal] = useState(0);
   const [highlightResourceId, setHighlightResourceId] = useState<string | null>(null);
+  const handleHighlightConsumed = useCallback(() => setHighlightResourceId(null), []);
 
   async function loadProject() {
     if (!projectId) {
@@ -1651,4 +1652,3 @@ function QCItem({ label, onClick }: { label: string; onClick: () => void }) {
     </button>
   );
 }
-  const handleHighlightConsumed = useCallback(() => setHighlightResourceId(null), []);
