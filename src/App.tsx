@@ -306,6 +306,10 @@ function App() {
     return <ProjectDashboard projectId={view.id} />;
   }
 
+  if (view.type === 'help') {
+    return <HelpPage />;
+  }
+
   if (isPublicRoute) {
     return (
       <>
@@ -410,7 +414,6 @@ function App() {
             {view.type === 'tool' && renderUtilities()}
             {view.type === 'organization' && <OrganizationPage />}
             {view.type === 'profile' && <ProfileSettings />}
-            {view.type === 'help' && <HelpPage />}
             {view.type === 'admin' && <Admin />}
             {view.type === 'tool' && view.tool === 'notfound' && <NotFound />}
           </main>
