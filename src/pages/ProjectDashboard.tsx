@@ -439,18 +439,40 @@ export function ProjectDashboard({
     setQuickLinkSaving(true);
     setQuickLinkError(null);
     try {
-      const { data, error } = await supabase
+      const basePayload = {
+        project_id: projectId,
+        url,
+        title: quickLinkTitle.trim(),
+        description: quickLinkDescription.trim(),
+        position: Date.now(),
+      };
+
+      let { data, error } = await supabase
         .from('project_resources')
-        .insert({
-          project_id: projectId,
-          url,
-          title: quickLinkTitle.trim(),
-          description: quickLinkDescription.trim(),
-          category: 'quick_links',
-          position: Date.now(),
-        })
+        .insert({ ...basePayload, category: 'quick_links' })
         .select('*')
         .single();
+
+      if (error) {
+        const msg = (error as { message?: string }).message || '';
+        const code = (error as { code?: string }).code || '';
+        const missingQuickLinksCategory =
+          code === '23514' ||
+          msg.includes('project_resources_category_check') ||
+          msg.toLowerCase().includes('check constraint');
+
+        if (missingQuickLinksCategory) {
+          const retry = await supabase
+            .from('project_resources')
+            .insert({ ...basePayload, category: 'other' })
+            .select('*')
+            .single();
+
+          data = retry.data;
+          error = retry.error as typeof error;
+        }
+      }
+
       if (error) throw error;
 
       setQuickLinkModalOpen(false);
@@ -1015,6 +1037,7 @@ export function ProjectDashboard({
                     {filesLoading && <div className="text-xs text-slate-400 mb-2">Loading files…</div>}
                     {filesError && <div className="text-xs text-red-400 mb-2">{filesError}</div>}
                     <FileTreePanel
+                      storageKey={`project-files-open:${projectId || 'unknown'}`}
                       nodes={nodes}
                       selectedId={selectedId}
                       onSelect={(id) => setSelectedId(id)}
@@ -1083,8 +1106,10 @@ export function ProjectDashboard({
                             prev.map((n) => (n.id === selectedDoc.id ? { ...n, content } : n)),
                           );
                         }}
-                        onSaved={async () => {
-                          await loadProject();
+                        onSaved={() => {
+                          setProject((prev) =>
+                            prev ? { ...prev, updated_at: new Date().toISOString() } : prev,
+                          );
                         }}
                       />
                     ) : (

@@ -56,8 +56,9 @@ export function PlannerView({
 
   useEffect(() => {
     if (!focusNewTaskSignal) return;
+    if (loading) return;
     titleRef.current?.focus();
-  }, [focusNewTaskSignal]);
+  }, [focusNewTaskSignal, loading]);
 
   const filteredSteps = useMemo(
     () => (showArchived ? steps : steps.filter((s) => !s.archived)),

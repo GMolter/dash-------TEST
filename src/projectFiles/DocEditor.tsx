@@ -44,7 +44,7 @@ export function DocEditor({
         await updateNode(doc.id, { content });
         lastSavedRef.current = content;
         setSaved(true);
-        onContentChange(content);
+        // Content is cached in parent on every keystroke; save here is backend sync only.
         onSaved?.();
       } catch {
         setSaved(false);
@@ -85,7 +85,11 @@ export function DocEditor({
 
       <textarea
         value={content}
-        onChange={(e) => setContent(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setContent(next);
+          onContentChange(next);
+        }}
         placeholder="Write here…"
         className="mt-5 w-full min-h-[420px] rounded-3xl bg-slate-950/60 border border-slate-800/60 px-5 py-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
       />

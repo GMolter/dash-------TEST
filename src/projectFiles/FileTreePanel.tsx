@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, ChevronDown, Folder, FileText, Paperclip, Image } from 'lucide-react';
 import type { FileNode } from './store';
 import { getFileTypeInfo, formatFileSize } from './store';
@@ -31,6 +31,7 @@ function buildTree(nodes: FileNode[]): TreeNode[] {
 }
 
 export function FileTreePanel({
+  storageKey,
   nodes,
   selectedId,
   onSelect,
@@ -39,6 +40,7 @@ export function FileTreePanel({
   onMove,
   onContextMenu,
 }: {
+  storageKey: string;
   nodes: FileNode[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -48,10 +50,39 @@ export function FileTreePanel({
   onContextMenu: (nodeId: string, x: number, y: number) => void;
 }) {
   const tree = useMemo(() => buildTree(nodes), [nodes]);
-  const [open, setOpen] = useState<Record<string, boolean>>(() => ({}));
+  const [open, setOpen] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(open));
+    } catch {}
+  }, [open, storageKey]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) {
+        setOpen({});
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      setOpen(parsed && typeof parsed === 'object' ? parsed : {});
+    } catch {
+      setOpen({});
+    }
+  }, [storageKey]);
 
   const toggle = (id: string) => setOpen((m) => ({ ...m, [id]: !m[id] }));
-  const isOpen = (id: string) => open[id] ?? true;
+  const isOpen = (id: string) => open[id] ?? false;
 
   return (
     <div className="select-none">
