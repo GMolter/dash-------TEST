@@ -25,6 +25,15 @@ const categoryColors = {
   other: 'bg-slate-500/15 text-slate-300 border-slate-500/25',
 };
 
+function toExternalUrl(raw: string) {
+  const value = raw.trim();
+  if (!value) return value;
+  // If scheme already exists (https:, http:, mailto:, etc.), keep it.
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(value)) return value;
+  // Default to https for bare domains like "google.com".
+  return `https://${value}`;
+}
+
 function formatCategoryLabel(cat: Resource['category']) {
   if (cat === 'quick_links') return 'Quick Links';
   return cat.charAt(0).toUpperCase() + cat.slice(1);
@@ -232,6 +241,7 @@ function ResourceCard({
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const displayTitle = resource.title?.trim() || resource.url;
+  const externalUrl = toExternalUrl(resource.url);
 
   return (
     <div
@@ -249,7 +259,7 @@ function ResourceCard({
 
         <div className="flex-1 min-w-0">
           <a
-            href={resource.url}
+            href={externalUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="group/link flex items-center gap-1.5 mb-1"
@@ -332,6 +342,7 @@ function AddResourceModal({
   async function handleSubmit() {
     if (!url.trim()) return;
     if (category !== 'quick_links' && !title.trim()) return;
+    const normalizedUrl = toExternalUrl(url);
 
     setLoading(true);
     let nextPosition = 10;
@@ -354,7 +365,7 @@ function AddResourceModal({
       .from('project_resources')
       .insert({
         project_id: projectId,
-        url: url.trim(),
+        url: normalizedUrl,
         title: title.trim(),
         description: description.trim(),
         category,
@@ -503,6 +514,7 @@ function EditResourceModal({
       setError('URL is required.');
       return;
     }
+    const normalizedUrl = toExternalUrl(url);
     if (category !== 'quick_links' && !title.trim()) {
       setError('Title is required when category is not Quick Links.');
       return;
@@ -512,7 +524,7 @@ function EditResourceModal({
     setError('');
     const result = await onSave({
       ...resource,
-      url: url.trim(),
+      url: normalizedUrl,
       title: title.trim(),
       description: description.trim(),
       category,

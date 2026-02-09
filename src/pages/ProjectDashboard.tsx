@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Folder,
@@ -149,6 +149,13 @@ function stopIfEditableTarget(e: KeyboardEvent) {
 function navigateTo(path: string) {
   window.history.pushState({}, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function toExternalUrl(raw: string) {
+  const value = raw.trim();
+  if (!value) return value;
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(value)) return value;
+  return `https://${value}`;
 }
 
 export function ProjectDashboard({
@@ -430,7 +437,7 @@ export function ProjectDashboard({
 
   async function createQuickLinkResource() {
     if (!projectId) return;
-    const url = quickLinkUrl.trim();
+    const url = toExternalUrl(quickLinkUrl);
     if (!url) {
       setQuickLinkError('Link is required.');
       return;
@@ -1085,7 +1092,7 @@ export function ProjectDashboard({
                 <ResourcesView
                   projectId={projectId}
                   highlightResourceId={highlightResourceId}
-                  onHighlightConsumed={() => setHighlightResourceId(null)}
+                  onHighlightConsumed={handleHighlightConsumed}
                 />
               )}
 
@@ -1644,3 +1651,4 @@ function QCItem({ label, onClick }: { label: string; onClick: () => void }) {
     </button>
   );
 }
+  const handleHighlightConsumed = useCallback(() => setHighlightResourceId(null), []);
