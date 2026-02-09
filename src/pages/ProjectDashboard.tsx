@@ -382,14 +382,14 @@ export function ProjectDashboard({
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Top bar */}
         <header className="border-b border-slate-800/50 bg-slate-950/75 backdrop-blur">
-          <div className="px-8 py-5 flex items-center justify-between gap-6">
-            <div className="flex items-center gap-4 min-w-0">
+          <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-3 sm:gap-6">
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
               <button
                 onClick={handleBack}
-                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-slate-800/60 bg-slate-900/25 hover:bg-slate-900/45 transition-colors"
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl border border-slate-800/60 bg-slate-900/25 hover:bg-slate-900/45 transition-colors shrink-0"
               >
                 <ArrowLeft className="w-5 h-5" />
-                <span className="font-medium">Back to Projects</span>
+                <span className="font-medium hidden sm:inline">Back to Projects</span>
               </button>
 
               <div className="min-w-0">
@@ -407,8 +407,8 @@ export function ProjectDashboard({
               </div>
             </div>
 
-            <div className="flex-1 flex justify-center">
-              <div className="w-[680px] max-w-[60vw] relative">
+            <div className="order-3 w-full lg:order-none lg:flex-1 flex justify-center">
+              <div className="w-full lg:w-[680px] lg:max-w-[60vw] relative">
                 <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                 <input
                   ref={projectSearchRef}
@@ -417,17 +417,17 @@ export function ProjectDashboard({
                   placeholder="Search within this project…"
                   className="w-full pl-12 pr-16 py-3 rounded-2xl bg-slate-950/50 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                 />
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 border border-slate-700/70 rounded-xl px-2.5 py-1">
+                <div className="hidden sm:block absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 border border-slate-700/70 rounded-xl px-2.5 py-1">
                   Ctrl K
                 </div>
               </div>
             </div>
 
-            <div className="w-[240px] flex justify-end">{/* empty */}</div>
+            <div className="hidden lg:flex w-[240px] justify-end">{/* empty */}</div>
           </div>
         </header>
 
-        <main className="flex-1 px-8 py-8">
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           <div className="grid grid-cols-12 gap-6">
             {/* Left nav */}
             <aside className="col-span-12 lg:col-span-3 2xl:col-span-2">
@@ -485,7 +485,7 @@ export function ProjectDashboard({
             {/* Branch panel (Files tree) */}
             {tab === 'files' && branchOpen && (
               <section className="col-span-12 lg:col-span-3 2xl:col-span-3">
-                <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-4 h-[calc(100vh-220px)] min-h-[520px] flex flex-col">
+                <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-4 h-auto lg:h-[calc(100vh-220px)] min-h-[420px] lg:min-h-[520px] flex flex-col">
                   <div className="flex items-center justify-between">
                     <div>
                       <div className="text-sm font-semibold">Files</div>
@@ -627,7 +627,7 @@ export function ProjectDashboard({
         </main>
 
         {/* Quick Capture (button does not move) */}
-        <div ref={qcWrapRef} className="fixed bottom-8 right-8 z-40">
+        <div ref={qcWrapRef} className="fixed bottom-5 right-5 sm:bottom-8 sm:right-8 z-40">
           {qcOpen && (
             <div className="absolute bottom-full right-0 mb-3 w-52 rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl overflow-hidden">
               <QCItem label="Quick Note" onClick={() => setQcOpen(false)} />

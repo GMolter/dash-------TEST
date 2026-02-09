@@ -407,21 +407,21 @@ export function ProjectsCenterApp({
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Top bar */}
         <header className="border-b border-slate-800/50 bg-slate-950/75 backdrop-blur">
-          <div className="px-8 py-5 flex items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
+          <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-3 sm:gap-6">
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
               <button
                 onClick={() => navigateTo('/utilities')}
-                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-slate-800/60 bg-slate-900/25 hover:bg-slate-900/45 transition-colors"
+                className="inline-flex items-center gap-2 px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl border border-slate-800/60 bg-slate-900/25 hover:bg-slate-900/45 transition-colors shrink-0"
               >
                 <ArrowLeft className="w-5 h-5" />
-                <span className="font-medium">Back to Utilities</span>
+                <span className="font-medium hidden sm:inline">Back to Utilities</span>
               </button>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="h-9 w-9 rounded-2xl bg-gradient-to-br from-indigo-500 to-sky-400" />
-                <div className="leading-tight">
-                  <div className="text-lg font-semibold tracking-tight">Olio</div>
-                  <div className="text-sm text-slate-300">Projects Center</div>
+                <div className="leading-tight min-w-0">
+                  <div className="text-lg font-semibold tracking-tight truncate">Olio</div>
+                  <div className="text-sm text-slate-300 truncate">Projects Center</div>
                 </div>
               </div>
             </div>
@@ -442,13 +442,13 @@ export function ProjectsCenterApp({
               </span>
             </button>
 
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
               <button
                 onClick={() => {
                   setCreateScope(projectScope);
                   setCreateOpen(true);
                 }}
-                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-blue-500/20 border border-blue-500/30 text-blue-200 hover:bg-blue-500/25 transition-colors"
+                className="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-blue-500/20 border border-blue-500/30 text-blue-200 hover:bg-blue-500/25 transition-colors w-full sm:w-auto justify-center"
               >
                 <FolderPlus className="w-5 h-5" />
                 <span className="font-medium">New Project</span>
@@ -458,11 +458,11 @@ export function ProjectsCenterApp({
         </header>
 
         {/* Content */}
-        <main className="flex-1 px-8 py-8">
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {/* Controls */}
           <div className="flex flex-col lg:flex-row lg:items-center gap-4 mb-6">
-            <div className="flex-1 flex items-center gap-3">
-              <div className="relative flex-1 max-w-[680px]">
+            <div className="flex-1 flex flex-col lg:flex-row lg:items-center gap-3 min-w-0">
+              <div className="relative flex-1 max-w-full lg:max-w-[680px]">
                 <Search className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                 <input
                   ref={searchInputRef}
@@ -531,7 +531,7 @@ export function ProjectsCenterApp({
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
                 <PillButton active={filter === 'all'} onClick={() => setFilter('all')}>
                   All
                 </PillButton>
@@ -547,7 +547,7 @@ export function ProjectsCenterApp({
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <div className="inline-flex items-center gap-2 px-2 py-2 rounded-2xl border border-slate-800/60 bg-slate-950/20">
                 <button
                   onClick={() => setProjectScope('org')}
@@ -885,7 +885,7 @@ function PillButton({
   return (
     <button
       onClick={onClick}
-      className={`px-3 py-2 rounded-2xl border text-sm transition-colors ${
+      className={`px-3 py-2 rounded-2xl border text-sm whitespace-nowrap transition-colors ${
         active
           ? 'bg-slate-800/60 border-slate-700 text-white'
           : 'bg-slate-950/20 border-slate-800/60 text-slate-300 hover:bg-slate-900/35'
