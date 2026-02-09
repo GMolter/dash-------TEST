@@ -319,7 +319,7 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen text-white relative overflow-hidden">
+    <div className="min-h-screen text-white relative">
       <AnimatedBackground />
       <div className="relative z-10 min-h-screen flex flex-col">
         <header className="relative z-20 border-b border-slate-800/50 bg-slate-950/80 backdrop-blur">
@@ -397,7 +397,7 @@ function App() {
             </aside>
           )}
 
-          <main className="flex-1 p-4 sm:p-6 lg:p-10 overflow-y-auto">
+          <main className="flex-1 p-4 sm:p-6 lg:p-10">
             {view.type === 'home' && renderHome()}
             {view.type === 'utilities' && renderUtilities()}
             {view.type === 'tool' && renderUtilities()}

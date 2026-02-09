@@ -823,7 +823,7 @@ export function ProjectDashboard({
   }
 
   return (
-    <div className="min-h-screen text-white relative overflow-hidden">
+    <div className="min-h-screen text-white relative">
       <AnimatedBackground />
       {/* readability veil (keeps text readable vs the animation) */}
       <div className="absolute inset-0 bg-slate-950/45" />

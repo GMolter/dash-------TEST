@@ -401,7 +401,7 @@ export function ProjectsCenterApp({
   }
 
   return (
-    <div className="min-h-screen text-white relative overflow-hidden">
+    <div className="min-h-screen text-white relative">
       <AnimatedBackground />
 
       <div className="relative z-10 min-h-screen flex flex-col">
