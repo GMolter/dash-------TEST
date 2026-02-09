@@ -48,6 +48,13 @@ type Project = {
   updated_at: string;
 };
 
+type SearchAction = {
+  id: string;
+  label: string;
+  hint: string;
+  run: () => void;
+};
+
 function clampStatus(s: string) {
   const v = (s || '').toLowerCase();
   if (['planning', 'active', 'review', 'completed', 'archived'].includes(v)) return v;
@@ -117,8 +124,6 @@ export function ProjectDashboard({
   const [projectSearch, setProjectSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchIndex, setSearchIndex] = useState(0);
-  const [searchProjects, setSearchProjects] = useState<Project[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
 
   // Project settings modal
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -196,31 +201,6 @@ export function ProjectDashboard({
     }
   }
 
-  async function loadSearchProjects() {
-    if (!user) {
-      setSearchProjects([]);
-      return;
-    }
-
-    setSearchLoading(true);
-    try {
-      let query = supabase.from('projects').select('*').order('updated_at', { ascending: false });
-
-      if (organization?.id) {
-        query = query.or(`org_id.eq.${organization.id},user_id.eq.${user.id}`);
-      } else {
-        query = query.eq('user_id', user.id);
-      }
-
-      const { data } = await query;
-      setSearchProjects((data as Project[]) || []);
-    } catch {
-      setSearchProjects([]);
-    } finally {
-      setSearchLoading(false);
-    }
-  }
-
   async function loadFiles() {
     if (!projectId) return;
     setFilesLoading(true);
@@ -244,11 +224,6 @@ export function ProjectDashboard({
     loadProject();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, organization?.id, user?.id]);
-
-  useEffect(() => {
-    loadSearchProjects();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organization?.id, user?.id]);
 
   useEffect(() => {
     if (!project?.id) return;
@@ -309,16 +284,96 @@ export function ProjectDashboard({
     [nodes, selectedId],
   );
 
+  const actionItems = useMemo<SearchAction[]>(
+    () => [
+      {
+        id: 'open-settings',
+        label: 'Open Settings',
+        hint: 'Project',
+        run: () => setSettingsOpen(true),
+      },
+      {
+        id: 'open-overview',
+        label: 'Open Overview',
+        hint: 'Navigate',
+        run: () => setTab('overview'),
+      },
+      {
+        id: 'open-boards',
+        label: 'Open Boards',
+        hint: 'Navigate',
+        run: () => setTab('board'),
+      },
+      {
+        id: 'open-planner',
+        label: 'Open Planner',
+        hint: 'Navigate',
+        run: () => setTab('planner'),
+      },
+      {
+        id: 'open-files',
+        label: 'Open Files',
+        hint: 'Navigate',
+        run: () => {
+          setTab('files');
+          setBranchOpen(true);
+        },
+      },
+      {
+        id: 'open-resources',
+        label: 'Open Resources',
+        hint: 'Navigate',
+        run: () => setTab('resources'),
+      },
+      {
+        id: 'create-task',
+        label: 'Create New Task',
+        hint: 'Planner',
+        run: () => setTab('planner'),
+      },
+      {
+        id: 'create-document',
+        label: 'Create New Document',
+        hint: 'Files',
+        run: () => {
+          setTab('files');
+          setBranchOpen(true);
+          setNameModalMode('doc');
+          setNameModalParentId(null);
+          setNameModalTargetId(null);
+          setNameModalOpen(true);
+        },
+      },
+      {
+        id: 'create-folder',
+        label: 'Create New Folder',
+        hint: 'Files',
+        run: () => {
+          setTab('files');
+          setBranchOpen(true);
+          setNameModalMode('folder');
+          setNameModalParentId(null);
+          setNameModalTargetId(null);
+          setNameModalOpen(true);
+        },
+      },
+      {
+        id: 'open-quick-capture',
+        label: 'Open Quick Capture',
+        hint: 'Capture',
+        run: () => setQcOpen(true),
+      },
+    ],
+    [],
+  );
+
   const searchResults = useMemo(() => {
     const q = projectSearch.trim().toLowerCase();
     if (!q) return [];
-    return searchProjects
-      .filter((p) => {
-        const hay = `${p.name} ${p.description || ''} ${((p.tags || []) as string[]).join(' ')}`.toLowerCase();
-        return hay.includes(q);
-      })
-      .slice(0, 8);
-  }, [projectSearch, searchProjects]);
+    return actionItems
+      .filter((action) => `${action.label} ${action.hint}`.toLowerCase().includes(q))
+      .slice(0, 10);
+  }, [actionItems, projectSearch]);
 
   useEffect(() => {
     if (!projectSearch.trim()) {
@@ -336,13 +391,6 @@ export function ProjectDashboard({
     }
     setSearchIndex((i) => Math.min(i, Math.max(0, searchResults.length - 1)));
   }, [searchResults.length]);
-
-  useEffect(() => {
-    if (!projectSearch.trim()) return;
-    if (searchProjects.length || searchLoading) return;
-    loadSearchProjects();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectSearch, searchProjects.length, searchLoading]);
 
   useEffect(() => {
     if (!settingsOpen || !project) return;
@@ -381,7 +429,6 @@ export function ProjectDashboard({
 
       setProject(data as Project);
       setSettingsOpen(false);
-      await loadSearchProjects();
     } catch (err) {
       setSettingsError(err instanceof Error ? err.message : 'Failed to save project settings.');
     } finally {
@@ -541,7 +588,7 @@ export function ProjectDashboard({
 
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Top bar */}
-        <header className="border-b border-slate-800/50 bg-slate-950/75 backdrop-blur">
+        <header className="relative z-30 border-b border-slate-800/50 bg-slate-950/75 backdrop-blur">
           <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-3 sm:gap-6">
             <div className="flex items-center gap-3 sm:gap-4 min-w-0">
               <button
@@ -577,10 +624,7 @@ export function ProjectDashboard({
                     setProjectSearch(e.target.value);
                     setSearchOpen(true);
                   }}
-                  onFocus={() => {
-                    loadSearchProjects();
-                    setSearchOpen(!!projectSearch.trim());
-                  }}
+                  onFocus={() => setSearchOpen(!!projectSearch.trim())}
                   onBlur={() => {
                     window.setTimeout(() => setSearchOpen(false), 150);
                   }}
@@ -599,51 +643,44 @@ export function ProjectDashboard({
                       const chosen = searchResults[searchIndex];
                       if (chosen) {
                         setSearchOpen(false);
-                        navigateTo(`/projects/${chosen.id}`);
+                        chosen.run();
                       }
                     } else if (e.key === 'Escape') {
                       setSearchOpen(false);
                     }
                   }}
-                  placeholder="Search projects..."
+                  placeholder="Search actions in this project..."
                   className="w-full pl-12 pr-16 py-3 rounded-2xl bg-slate-950/50 border border-slate-800/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
                 />
                 <div className="hidden sm:block absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 border border-slate-700/70 rounded-xl px-2.5 py-1">
                   Ctrl K
                 </div>
                 {searchOpen && !!projectSearch.trim() && (
-                  <div className="absolute left-0 right-0 mt-2 z-20 rounded-2xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-xl overflow-hidden">
-                    {searchLoading ? (
-                      <div className="px-4 py-3 text-sm text-slate-300">Searching projects...</div>
-                    ) : searchResults.length > 0 ? (
-                      searchResults.map((p, idx) => {
+                  <div className="absolute left-0 right-0 mt-2 z-50 rounded-2xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-xl overflow-hidden">
+                    {searchResults.length > 0 ? (
+                      searchResults.map((action, idx) => {
                         const active = idx === searchIndex;
                         return (
                           <button
-                            key={p.id}
+                            key={action.id}
                             onMouseEnter={() => setSearchIndex(idx)}
                             onClick={() => {
                               setSearchOpen(false);
-                              navigateTo(`/projects/${p.id}`);
+                              action.run();
                             }}
                             className={`w-full text-left px-4 py-3 flex items-center justify-between gap-3 transition-colors ${
                               active ? 'bg-slate-900/60' : 'hover:bg-slate-900/40'
                             }`}
                           >
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold truncate">{p.name}</div>
-                              <div className="text-xs text-slate-400 truncate">
-                                {p.description || 'No description'}
-                              </div>
-                            </div>
-                            <div className="text-xs text-slate-400 whitespace-nowrap">
-                              {formatRelative(p.updated_at || p.created_at)}
-                            </div>
+                            <span className="text-sm font-semibold text-slate-100 truncate">
+                              {action.label}
+                            </span>
+                            <span className="text-xs text-slate-400 whitespace-nowrap">{action.hint}</span>
                           </button>
                         );
                       })
                     ) : (
-                      <div className="px-4 py-3 text-sm text-slate-400">No matching projects.</div>
+                      <div className="px-4 py-3 text-sm text-slate-400">No matching actions.</div>
                     )}
                   </div>
                 )}
