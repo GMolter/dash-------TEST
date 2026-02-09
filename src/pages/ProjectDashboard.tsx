@@ -439,12 +439,21 @@ export function ProjectDashboard({
     setQuickLinkSaving(true);
     setQuickLinkError(null);
     try {
+      const { data: posData, error: posError } = await supabase
+        .from('project_resources')
+        .select('position')
+        .eq('project_id', projectId)
+        .order('position', { ascending: false })
+        .limit(1);
+      if (posError) throw posError;
+      const nextPosition = (((posData as { position: number }[]) || [])[0]?.position || 0) + 10;
+
       const basePayload = {
         project_id: projectId,
         url,
         title: quickLinkTitle.trim(),
         description: quickLinkDescription.trim(),
-        position: Date.now(),
+        position: nextPosition,
       };
 
       let { data, error } = await supabase

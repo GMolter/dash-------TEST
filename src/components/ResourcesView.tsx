@@ -334,8 +334,23 @@ function AddResourceModal({
     if (category !== 'quick_links' && !title.trim()) return;
 
     setLoading(true);
+    let nextPosition = 10;
+    try {
+      const { data: posData, error: posError } = await supabase
+        .from('project_resources')
+        .select('position')
+        .eq('project_id', projectId)
+        .order('position', { ascending: false })
+        .limit(1);
+      if (posError) throw posError;
+      nextPosition = (((posData as { position: number }[]) || [])[0]?.position || 0) + 10;
+    } catch (e) {
+      console.error('Error calculating resource position:', e);
+      setLoading(false);
+      return;
+    }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('project_resources')
       .insert({
         project_id: projectId,
@@ -343,10 +358,36 @@ function AddResourceModal({
         title: title.trim(),
         description: description.trim(),
         category,
-        position: Date.now(),
+        position: nextPosition,
       })
       .select('*')
       .single();
+
+    if (error && category === 'quick_links') {
+      const msg = (error as { message?: string }).message || '';
+      const code = (error as { code?: string }).code || '';
+      const missingQuickLinksCategory =
+        code === '23514' ||
+        msg.includes('project_resources_category_check') ||
+        msg.toLowerCase().includes('check constraint');
+
+      if (missingQuickLinksCategory) {
+        const retry = await supabase
+          .from('project_resources')
+          .insert({
+            project_id: projectId,
+            url: url.trim(),
+            title: title.trim(),
+            description: description.trim(),
+            category: 'other',
+            position: nextPosition,
+          })
+          .select('*')
+          .single();
+        data = retry.data;
+        error = retry.error as typeof error;
+      }
+    }
 
     setLoading(false);
 
