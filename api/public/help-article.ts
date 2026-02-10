@@ -5,6 +5,7 @@ import { getSupabaseServiceConfig } from "../_utils/supabaseConfig";
 
 export default async function handler(req: any, res: any) {
   try {
+    res.setHeader("Cache-Control", "no-store");
     const cfg = getSupabaseServiceConfig();
     if (!cfg.ok) {
       return res.status(503).json({ error: cfg.error, detail: cfg.detail || "" });

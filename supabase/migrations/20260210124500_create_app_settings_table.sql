@@ -6,5 +6,6 @@ create table if not exists public.app_settings (
   updated_at timestamptz not null default now()
 );
 
-alter table public.app_settings
-add column if not exists help_docs text not null default '';
+insert into public.app_settings (id)
+values ('global')
+on conflict (id) do nothing;

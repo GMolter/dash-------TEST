@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, FileText } from 'lucide-react';
+import { ArrowLeft, FileText, Home } from 'lucide-react';
 
 type Article = {
   id: string;
@@ -20,7 +20,7 @@ export function HelpArticlePage({ slug }: { slug: string }) {
 
     async function load() {
       try {
-        const r = await fetch(`/api/public/help-article?slug=${encodeURIComponent(slug)}`);
+        const r = await fetch(`/api/public/help-article?slug=${encodeURIComponent(slug)}`, { cache: 'no-store' });
         if (r.status === 404) {
           if (!cancelled) setMissing(true);
           return;
@@ -43,13 +43,22 @@ export function HelpArticlePage({ slug }: { slug: string }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
       <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
-        <a
-          href="/help"
-          className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-white mb-5"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Help
-        </a>
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <a
+            href="/help"
+            className="inline-flex items-center gap-2 text-sm text-slate-300 hover:text-white"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Help
+          </a>
+          <a
+            href="/"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-200 hover:border-blue-500/40 hover:text-white transition-colors"
+          >
+            <Home className="h-4 w-4" />
+            Dashboard
+          </a>
+        </div>
 
         <section className="rounded-2xl border border-slate-700/70 bg-slate-900/50 p-6 backdrop-blur-sm">
           {loading ? (

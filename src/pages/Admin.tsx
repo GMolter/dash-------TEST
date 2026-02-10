@@ -21,6 +21,7 @@ type BannerState = {
 };
 
 type AdminTab = "overview" | "banner" | "help-docs";
+type ArticleFilter = "all" | "published" | "drafts";
 
 type HelpArticle = {
   id: string;
@@ -73,6 +74,7 @@ export default function Admin() {
   const [articleContent, setArticleContent] = useState("");
   const [articlePublished, setArticlePublished] = useState(false);
   const [articleSortOrder, setArticleSortOrder] = useState(0);
+  const [articleFilter, setArticleFilter] = useState<ArticleFilter>("all");
 
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
@@ -85,6 +87,11 @@ export default function Admin() {
     () => articles.find((a) => a.id === selectedArticleId) || null,
     [articles, selectedArticleId]
   );
+  const filteredArticles = useMemo(() => {
+    if (articleFilter === "published") return articles.filter((a) => a.is_published);
+    if (articleFilter === "drafts") return articles.filter((a) => !a.is_published);
+    return articles;
+  }, [articles, articleFilter]);
 
   async function adminFetch(url: string, init?: RequestInit) {
     const { data } = await supabase.auth.getSession();
@@ -664,14 +671,50 @@ export default function Admin() {
                     New Article Draft
                   </button>
 
-                  <div className="text-xs text-slate-400 px-1 pt-2">Articles</div>
+                  <div className="pt-2 space-y-2">
+                    <div className="text-xs text-slate-400 px-1">Articles</div>
+                    <div className="grid grid-cols-3 gap-1">
+                      <button
+                        onClick={() => setArticleFilter("all")}
+                        className={`rounded-md px-2 py-1 text-xs border transition ${
+                          articleFilter === "all"
+                            ? "border-blue-500/40 bg-blue-500/15 text-blue-100"
+                            : "border-slate-700 bg-slate-950/60 text-slate-300 hover:border-slate-600"
+                        }`}
+                      >
+                        All ({articles.length})
+                      </button>
+                      <button
+                        onClick={() => setArticleFilter("published")}
+                        className={`rounded-md px-2 py-1 text-xs border transition ${
+                          articleFilter === "published"
+                            ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-100"
+                            : "border-slate-700 bg-slate-950/60 text-slate-300 hover:border-slate-600"
+                        }`}
+                      >
+                        Published ({articles.filter((a) => a.is_published).length})
+                      </button>
+                      <button
+                        onClick={() => setArticleFilter("drafts")}
+                        className={`rounded-md px-2 py-1 text-xs border transition ${
+                          articleFilter === "drafts"
+                            ? "border-amber-500/40 bg-amber-500/15 text-amber-100"
+                            : "border-slate-700 bg-slate-950/60 text-slate-300 hover:border-slate-600"
+                        }`}
+                      >
+                        Drafts ({articles.filter((a) => !a.is_published).length})
+                      </button>
+                    </div>
+                  </div>
                   <div className="max-h-[460px] overflow-auto space-y-1 pr-1">
                     {loadingArticles ? (
                       <div className="text-sm text-slate-400 px-2 py-2">Loading...</div>
-                    ) : articles.length === 0 ? (
-                      <div className="text-sm text-slate-500 px-2 py-2">No articles yet.</div>
+                    ) : filteredArticles.length === 0 ? (
+                      <div className="text-sm text-slate-500 px-2 py-2">
+                        {articles.length === 0 ? "No articles yet." : "No articles match this filter."}
+                      </div>
                     ) : (
-                      articles.map((article) => (
+                      filteredArticles.map((article) => (
                         <button
                           key={article.id}
                           onClick={() => hydrateEditor(article)}
@@ -682,6 +725,13 @@ export default function Admin() {
                           }`}
                         >
                           <div className="font-medium truncate">{article.title}</div>
+                          <div className={`mt-1 inline-flex rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                            article.is_published
+                              ? "bg-emerald-500/15 text-emerald-200"
+                              : "bg-amber-500/15 text-amber-200"
+                          }`}>
+                            {article.is_published ? "Published" : "Draft"}
+                          </div>
                           <div className="text-xs text-slate-400 truncate">/help/article/{article.slug}</div>
                         </button>
                       ))
