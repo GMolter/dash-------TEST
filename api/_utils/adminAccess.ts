@@ -68,8 +68,8 @@ export async function requireAdminAccess(
   const requirePasswordSession = options?.requirePasswordSession ?? true;
 
   if (requirePasswordSession) {
-    const cookieSecret = process.env.ADMIN_COOKIE_SECRET;
-    if (!cookieSecret) return { ok: false, status: 500, error: "Missing ADMIN_COOKIE_SECRET" };
+    const cookieSecret = process.env.ADMIN_COOKIE_SECRET || process.env.ADMIN_PASSWORD;
+    if (!cookieSecret) return { ok: false, status: 500, error: "Missing ADMIN_COOKIE_SECRET or ADMIN_PASSWORD" };
     if (!isAuthed(req, cookieSecret)) return { ok: false, status: 401, error: "Unauthorized" };
   }
 

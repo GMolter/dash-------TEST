@@ -6,7 +6,14 @@ export default async function handler(_req: any, res: any) {
   try {
     const url = process.env.SUPABASE_URL;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !service) return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+    if (!url || !service) {
+      return res.status(200).json({
+        bannerEnabled: false,
+        bannerText: "",
+        updatedAt: null,
+        warning: "Settings backend is not configured.",
+      });
+    }
 
     const supabase = createClient(url, service);
 
@@ -16,7 +23,18 @@ export default async function handler(_req: any, res: any) {
       .eq("id", "global")
       .maybeSingle();
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      // Missing table in an older environment should not break app startup.
+      if (error.code === "42P01") {
+        return res.status(200).json({
+          bannerEnabled: false,
+          bannerText: "",
+          updatedAt: null,
+          warning: "app_settings table not found.",
+        });
+      }
+      return res.status(500).json({ error: error.message });
+    }
 
     return res.status(200).json({
       bannerEnabled: !!data?.banner_enabled,

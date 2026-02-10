@@ -4,8 +4,8 @@ import { resolveAppAdminFromRequest } from "../_utils/adminAccess";
 
 export default async function handler(req: any, res: any) {
   try {
-    const cookieSecret = process.env.ADMIN_COOKIE_SECRET;
-    if (!cookieSecret) return res.status(500).json({ error: "Missing ADMIN_COOKIE_SECRET" });
+    const cookieSecret = process.env.ADMIN_COOKIE_SECRET || process.env.ADMIN_PASSWORD;
+    if (!cookieSecret) return res.status(200).json({ authed: false, appAdmin: false, reason: "Admin auth is not configured." });
 
     if (!isAuthed(req, cookieSecret)) {
       return res.status(200).json({ authed: false, appAdmin: false });

@@ -9,7 +9,7 @@ export default async function handler(req: any, res: any) {
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
     const adminPassword = process.env.ADMIN_PASSWORD;
-    const cookieSecret = process.env.ADMIN_COOKIE_SECRET;
+    const cookieSecret = process.env.ADMIN_COOKIE_SECRET || process.env.ADMIN_PASSWORD;
 
     if (!adminPassword || !cookieSecret) {
       return res.status(500).json({ error: "Missing ADMIN_PASSWORD or ADMIN_COOKIE_SECRET" });
