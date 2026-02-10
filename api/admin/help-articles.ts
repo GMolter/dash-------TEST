@@ -179,6 +179,13 @@ export default async function handler(req: any, res: any) {
         detail: String(err?.message || err),
       });
     }
-    return res.status(500).json({ error: "Internal error", detail: String(err?.message || err) });
+    const detail = String(err?.message || err);
+    if (req.method === "POST") {
+      return res.status(400).json({
+        error: "Unable to create article.",
+        detail,
+      });
+    }
+    return res.status(500).json({ error: "Internal error", detail });
   }
 }

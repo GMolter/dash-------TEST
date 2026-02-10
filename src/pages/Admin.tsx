@@ -293,7 +293,7 @@ export default function Admin() {
 
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setMsg({ kind: "err", text: j.error || "Failed to create article." });
+        setMsg({ kind: "err", text: j.error || j.detail || "Failed to create article." });
         return;
       }
 
@@ -336,7 +336,7 @@ export default function Admin() {
 
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setMsg({ kind: "err", text: j.error || "Failed to save article." });
+        setMsg({ kind: "err", text: j.error || j.detail || "Failed to save article." });
         return;
       }
 
@@ -360,7 +360,7 @@ export default function Admin() {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setMsg({ kind: "err", text: j.error || "Failed to delete article." });
+        setMsg({ kind: "err", text: j.error || j.detail || "Failed to delete article." });
         return;
       }
 
