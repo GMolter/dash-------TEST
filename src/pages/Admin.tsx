@@ -45,6 +45,8 @@ function slugify(input: string) {
 
 export default function Admin() {
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [appAdmin, setAppAdmin] = useState(false);
+  const [accessReason, setAccessReason] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
 
   const [password, setPassword] = useState("");
@@ -99,8 +101,12 @@ export default function Admin() {
     try {
       const j = JSON.parse(text);
       setAuthed(Boolean(j.authed));
+      setAppAdmin(Boolean(j.appAdmin));
+      setAccessReason(j.reason || null);
     } catch {
       setAuthed(false);
+      setAppAdmin(false);
+      setAccessReason("Failed to verify admin access.");
     }
   }
 
@@ -171,10 +177,10 @@ export default function Admin() {
   }, []);
 
   useEffect(() => {
-    if (!authed) return;
+    if (!authed || !appAdmin) return;
     loadSettings();
     loadArticles();
-  }, [authed]);
+  }, [authed, appAdmin]);
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -390,6 +396,48 @@ export default function Admin() {
                 This uses an HttpOnly session cookie. The password is not retained after login.
               </p>
             </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!appAdmin) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
+        <div className="relative z-10 max-w-5xl mx-auto px-6 py-10 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
+                <LayoutDashboard className="w-5 h-5 text-blue-300" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-semibold text-blue-200">App Admin Panel</h1>
+                <p className="text-sm text-slate-400">Password session is active.</p>
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 bg-slate-900/70 hover:bg-slate-800 border border-slate-700 text-slate-100 transition"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5">
+            <h2 className="text-lg font-semibold text-amber-100">Data Access Blocked</h2>
+            <p className="mt-2 text-sm text-amber-50/90">
+              You can open this page with the admin password, but only app-admin accounts can view or change admin data.
+            </p>
+            {accessReason && (
+              <p className="mt-3 text-xs text-amber-100/80">
+                Reason: {accessReason}
+              </p>
+            )}
+            <p className="mt-3 text-xs text-amber-100/80">
+              Ask a database administrator to set <code>profiles.app_admin = true</code> for your account.
+            </p>
           </div>
         </div>
       </div>

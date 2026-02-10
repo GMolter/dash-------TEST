@@ -12,7 +12,7 @@ function readBearerToken(req: any) {
   return value.slice(7).trim() || null;
 }
 
-async function resolveAppAdmin(req: any): Promise<AccessResult> {
+export async function resolveAppAdminFromRequest(req: any): Promise<AccessResult> {
   const url = process.env.SUPABASE_URL;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !service) {
@@ -73,5 +73,5 @@ export async function requireAdminAccess(
     if (!isAuthed(req, cookieSecret)) return { ok: false, status: 401, error: "Unauthorized" };
   }
 
-  return resolveAppAdmin(req);
+  return resolveAppAdminFromRequest(req);
 }
