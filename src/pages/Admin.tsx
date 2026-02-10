@@ -797,14 +797,6 @@ export default function Admin() {
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={createArticle}
-                        disabled={articleCreating || !articleTitle.trim()}
-                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 border border-blue-500/30 bg-blue-500/10 text-blue-100 disabled:opacity-40"
-                      >
-                        <Plus className="w-4 h-4" />
-                        {articleCreating ? "Creating..." : "Create New"}
-                      </button>
-                      <button
                         onClick={selectedArticleId ? saveArticle : createArticle}
                         disabled={(selectedArticleId ? articleSaving : articleCreating) || !articleTitle.trim()}
                         className="inline-flex items-center gap-2 rounded-lg px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 text-emerald-100 disabled:opacity-40"

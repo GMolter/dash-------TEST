@@ -13,6 +13,35 @@ function toSlug(input: string) {
     .slice(0, 80);
 }
 
+function parseBody(raw: any) {
+  if (!raw) return {};
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  if (Buffer.isBuffer(raw)) {
+    try {
+      return JSON.parse(raw.toString("utf8"));
+    } catch {
+      return {};
+    }
+  }
+  return raw;
+}
+
+function toBoolean(value: any) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") return true;
+    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") return false;
+  }
+  return Boolean(value);
+}
+
 export default async function handler(req: any, res: any) {
   try {
     const access = await requireAdminAccess(req, { requirePasswordSession: true });
@@ -40,7 +69,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === "PUT") {
-      const body = req.body || {};
+      const body = parseBody(req.body);
       const title = String(body.title || "").trim();
       if (!title) return res.status(400).json({ error: "title is required" });
 
@@ -50,7 +79,7 @@ export default async function handler(req: any, res: any) {
 
       const summary = String(body.summary || "");
       const content = String(body.content || "");
-      const isPublished = Boolean(body.isPublished);
+      const isPublished = toBoolean(body.isPublished);
       const sortOrder = Number.isFinite(Number(body.sortOrder)) ? Number(body.sortOrder) : 0;
 
       const { data, error } = await supabase
@@ -66,7 +95,7 @@ export default async function handler(req: any, res: any) {
         })
         .eq("id", id)
         .select("id,slug,title,summary,content,is_published,sort_order,created_at,updated_at")
-        .single();
+        .maybeSingle();
 
       if (error) {
         if (error.code === "23505") return res.status(409).json({ error: "Slug already exists" });
@@ -76,7 +105,15 @@ export default async function handler(req: any, res: any) {
         if (error.code === "42703") {
           return res.status(400).json({ error: "help_articles schema is outdated. Run DB migrations." });
         }
-        return res.status(400).json({ error: error.message || "Unable to save article." });
+        return res.status(400).json({
+          error: error.message || "Unable to save article.",
+          code: error.code || null,
+          detail: error.details || error.hint || null,
+        });
+      }
+
+      if (!data) {
+        return res.status(404).json({ error: "Article not found" });
       }
 
       return res.status(200).json({ article: data });
