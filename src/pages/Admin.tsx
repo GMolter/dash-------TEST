@@ -114,7 +114,15 @@ export default function Admin() {
     try {
       const r = await adminFetch("/api/admin/help-articles");
       const j = await r.json();
+      const warning = typeof j.warning === "string" ? j.warning : "";
+
       if (!r.ok) {
+        setAppAdmin(false);
+        setAccessReason("Unauthorized Account");
+        setArticles([]);
+        return;
+      }
+      if (/unauthorized/i.test(warning)) {
         setAppAdmin(false);
         setAccessReason("Unauthorized Account");
         setArticles([]);
@@ -172,8 +180,9 @@ export default function Admin() {
       try {
         const r = await adminFetch("/api/admin/help-articles");
         const j = await r.json().catch(() => ({}));
+        const warning = typeof j.warning === "string" ? j.warning : "";
         if (cancelled) return;
-        if (r.ok) {
+        if (r.ok && !/unauthorized/i.test(warning)) {
           setAuthed(true);
           setAppAdmin(true);
           setAccessReason(null);

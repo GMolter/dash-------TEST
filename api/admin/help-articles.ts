@@ -14,19 +14,29 @@ function toSlug(input: string) {
 
 export default async function handler(req: any, res: any) {
   try {
+    const isGet = req.method === "GET";
+
     const access = await requireAdminAccess(req, { requirePasswordSession: true });
-    if (!access.ok) return res.status(access.status).json({ error: access.error });
+    if (!access.ok) {
+      if (isGet) {
+        return res.status(200).json({
+          articles: [],
+          warning: access.error || "Unauthorized Account",
+        });
+      }
+      return res.status(access.status).json({ error: access.error });
+    }
 
     const url = process.env.SUPABASE_URL;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !service) {
-      if (req.method === "GET") return res.status(200).json({ articles: [], warning: "Help articles backend not configured." });
+      if (isGet) return res.status(200).json({ articles: [], warning: "Help articles backend not configured." });
       return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
     }
 
     const supabase = createClient(url, service);
 
-    if (req.method === "GET") {
+    if (isGet) {
       const { data, error } = await supabase
         .from("help_articles")
         .select("id,slug,title,summary,content,is_published,sort_order,created_at,updated_at")
@@ -78,7 +88,13 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err: any) {
     console.error("admin/help-articles crash:", err);
-    if (req.method === "GET") return res.status(200).json({ articles: [], warning: "Help articles endpoint fallback due to runtime error." });
+    if (req.method === "GET") {
+      return res.status(200).json({
+        articles: [],
+        warning: "Help articles endpoint fallback due to runtime error.",
+        detail: String(err?.message || err),
+      });
+    }
     return res.status(500).json({ error: "Internal error" });
   }
 }
