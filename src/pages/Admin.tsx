@@ -44,7 +44,7 @@ function slugify(input: string) {
 }
 
 export default function Admin() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [authed, setAuthed] = useState<boolean>(false);
   const [appAdmin, setAppAdmin] = useState(false);
   const [accessReason, setAccessReason] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
@@ -95,21 +95,6 @@ export default function Admin() {
     });
   }
 
-  async function refreshAuth() {
-    const r = await adminFetch("/api/admin/me");
-    const text = await r.text();
-    try {
-      const j = JSON.parse(text);
-      setAuthed(Boolean(j.authed));
-      setAppAdmin(Boolean(j.appAdmin));
-      setAccessReason(j.reason || null);
-    } catch {
-      setAuthed(false);
-      setAppAdmin(false);
-      setAccessReason("Failed to verify admin access.");
-    }
-  }
-
   async function loadSettings() {
     setLoadingSettings(true);
     try {
@@ -129,7 +114,14 @@ export default function Admin() {
     try {
       const r = await adminFetch("/api/admin/help-articles");
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error || "Failed to load help articles");
+      if (!r.ok) {
+        setAppAdmin(false);
+        setAccessReason(j.error || "You do not have app admin data access.");
+        setArticles([]);
+        return;
+      }
+      setAppAdmin(true);
+      setAccessReason(null);
       const list = Array.isArray(j.articles) ? (j.articles as HelpArticle[]) : [];
       setArticles(list);
 
@@ -146,6 +138,8 @@ export default function Admin() {
         hydrateEditor(list[0]);
       }
     } catch {
+      setAppAdmin(false);
+      setAccessReason("Could not load help articles.");
       setMsg({ kind: "err", text: "Could not load help articles." });
     } finally {
       setLoadingArticles(false);
@@ -173,14 +167,34 @@ export default function Admin() {
   }
 
   useEffect(() => {
-    refreshAuth();
+    let cancelled = false;
+    async function bootstrap() {
+      try {
+        const r = await adminFetch("/api/admin/help-articles");
+        const j = await r.json().catch(() => ({}));
+        if (cancelled) return;
+        if (r.ok) {
+          setAuthed(true);
+          setAppAdmin(true);
+          setAccessReason(null);
+          await loadSettings();
+          await loadArticles();
+        } else {
+          setAuthed(false);
+          setAppAdmin(false);
+          setAccessReason(j.error || null);
+        }
+      } catch {
+        if (cancelled) return;
+        setAuthed(false);
+        setAppAdmin(false);
+      }
+    }
+    bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  useEffect(() => {
-    if (!authed || !appAdmin) return;
-    loadSettings();
-    loadArticles();
-  }, [authed, appAdmin]);
 
   async function login(e: React.FormEvent) {
     e.preventDefault();
@@ -199,12 +213,18 @@ export default function Admin() {
     }
 
     setPassword("");
-    await refreshAuth();
+    setAuthed(true);
+    await loadSettings();
+    await loadArticles();
   }
 
   async function logout() {
     await adminFetch("/api/admin/logout", { method: "POST" });
-    await refreshAuth();
+    setAuthed(false);
+    setAppAdmin(false);
+    setAccessReason(null);
+    setArticles([]);
+    clearEditor();
   }
 
   async function saveBanner() {
@@ -347,14 +367,6 @@ export default function Admin() {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "Unknown";
     return d.toLocaleString();
-  }
-
-  if (authed === null) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
-        <div className="max-w-5xl mx-auto px-6 py-12 text-slate-300">Loading...</div>
-      </div>
-    );
   }
 
   if (!authed) {
