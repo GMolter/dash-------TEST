@@ -16,7 +16,7 @@ export async function resolveAppAdminFromRequest(req: any): Promise<AccessResult
   const url = process.env.SUPABASE_URL;
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !service) {
-    return { ok: false, status: 500, error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" };
+    return { ok: false, status: 403, error: "Unauthorized Account" };
   }
 
   const accessToken = readBearerToken(req);
@@ -42,20 +42,12 @@ export async function resolveAppAdminFromRequest(req: any): Promise<AccessResult
 
   if (profileError) {
     if (profileError.code === "42703") {
-      return {
-        ok: false,
-        status: 500,
-        error: "Database migration missing: run migration that adds profiles.app_admin.",
-      };
+      return { ok: false, status: 403, error: "Unauthorized Account" };
     }
-    return { ok: false, status: 500, error: profileError.message };
+    return { ok: false, status: 403, error: "Unauthorized Account" };
   }
   if (!profile?.app_admin) {
-    return {
-      ok: false,
-      status: 403,
-      error: "Your account is not marked as an app admin (profiles.app_admin must be true).",
-    };
+    return { ok: false, status: 403, error: "Unauthorized Account" };
   }
 
   return { ok: true, userId: userData.user.id, email: profile.email || null };
@@ -69,7 +61,7 @@ export async function requireAdminAccess(
 
   if (requirePasswordSession) {
     const cookieSecret = process.env.ADMIN_COOKIE_SECRET || process.env.ADMIN_PASSWORD;
-    if (!cookieSecret) return { ok: false, status: 500, error: "Missing ADMIN_COOKIE_SECRET or ADMIN_PASSWORD" };
+    if (!cookieSecret) return { ok: false, status: 403, error: "Unauthorized Account" };
     if (!isAuthed(req, cookieSecret)) return { ok: false, status: 401, error: "Unauthorized" };
   }
 

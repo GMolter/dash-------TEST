@@ -20,6 +20,7 @@ export default async function handler(req: any, res: any) {
     const url = process.env.SUPABASE_URL;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !service) {
+      if (req.method === "GET") return res.status(200).json({ articles: [], warning: "Help articles backend not configured." });
       return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
     }
 
@@ -32,7 +33,10 @@ export default async function handler(req: any, res: any) {
         .order("sort_order", { ascending: true })
         .order("updated_at", { ascending: false });
 
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) {
+        if (error.code === "42P01") return res.status(200).json({ articles: [], warning: "help_articles table not found." });
+        return res.status(200).json({ articles: [], warning: error.message || "Unable to load help articles." });
+      }
       return res.status(200).json({ articles: data || [] });
     }
 
@@ -74,6 +78,7 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err: any) {
     console.error("admin/help-articles crash:", err);
+    if (req.method === "GET") return res.status(200).json({ articles: [], warning: "Help articles endpoint fallback due to runtime error." });
     return res.status(500).json({ error: "Internal error" });
   }
 }

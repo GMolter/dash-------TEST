@@ -116,7 +116,7 @@ export default function Admin() {
       const j = await r.json();
       if (!r.ok) {
         setAppAdmin(false);
-        setAccessReason(j.error || "You do not have app admin data access.");
+        setAccessReason("Unauthorized Account");
         setArticles([]);
         return;
       }
@@ -139,7 +139,7 @@ export default function Admin() {
       }
     } catch {
       setAppAdmin(false);
-      setAccessReason("Could not load help articles.");
+      setAccessReason("Unauthorized Account");
       setMsg({ kind: "err", text: "Could not load help articles." });
     } finally {
       setLoadingArticles(false);
