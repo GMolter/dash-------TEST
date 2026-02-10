@@ -94,7 +94,7 @@ export default async function handler(req: any, res: any) {
           warning: "Help articles backend not configured.",
         });
       }
-      return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+      return res.status(503).json({ error: "Help articles backend not configured." });
     }
 
     const supabase = createClient(url, service);
@@ -158,7 +158,13 @@ export default async function handler(req: any, res: any) {
 
       if (error) {
         if (error.code === "23505") return res.status(409).json({ error: "Slug already exists" });
-        return res.status(500).json({ error: error.message });
+        if (error.code === "42P01") {
+          return res.status(400).json({ error: "help_articles table not found. Run DB migrations." });
+        }
+        if (error.code === "42703") {
+          return res.status(400).json({ error: "help_articles schema is outdated. Run DB migrations." });
+        }
+        return res.status(400).json({ error: error.message || "Unable to create article." });
       }
       return res.status(200).json({ article: data });
     }
@@ -173,6 +179,6 @@ export default async function handler(req: any, res: any) {
         detail: String(err?.message || err),
       });
     }
-    return res.status(500).json({ error: "Internal error" });
+    return res.status(500).json({ error: "Internal error", detail: String(err?.message || err) });
   }
 }

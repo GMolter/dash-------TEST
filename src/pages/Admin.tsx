@@ -63,6 +63,9 @@ export default function Admin() {
   const [articleCreating, setArticleCreating] = useState(false);
   const [articleDeleting, setArticleDeleting] = useState(false);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteNameInput, setDeleteNameInput] = useState("");
+  const [deleteAcknowledge, setDeleteAcknowledge] = useState(false);
 
   const [articleTitle, setArticleTitle] = useState("");
   const [articleSlug, setArticleSlug] = useState("");
@@ -363,6 +366,9 @@ export default function Admin() {
 
       await loadArticles();
       clearEditor();
+      setShowDeleteModal(false);
+      setDeleteNameInput("");
+      setDeleteAcknowledge(false);
       setMsg({ kind: "ok", text: "Article deleted." });
     } catch {
       setMsg({ kind: "err", text: "Network error while deleting article." });
@@ -721,11 +727,11 @@ export default function Admin() {
                       <label className="block text-sm text-slate-300">
                         <span className="inline-flex items-center gap-1">
                           Sort Order
-                          <span
-                            title="Lower numbers appear first in /help. If equal, newer updates appear first."
-                            className="inline-flex items-center text-slate-400 cursor-help"
-                          >
+                          <span className="group relative inline-flex items-center text-slate-400">
                             <HelpCircle className="w-4 h-4" />
+                            <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100">
+                              Lower numbers show first.
+                            </span>
                           </span>
                         </span>
                       </label>
@@ -764,7 +770,11 @@ export default function Admin() {
 
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <button
-                      onClick={deleteArticle}
+                      onClick={() => {
+                        setShowDeleteModal(true);
+                        setDeleteNameInput("");
+                        setDeleteAcknowledge(false);
+                      }}
                       disabled={!selectedArticleId || articleDeleting}
                       className="inline-flex items-center gap-2 rounded-lg px-3 py-2 border border-red-500/30 bg-red-500/10 text-red-200 disabled:opacity-40"
                     >
@@ -782,12 +792,14 @@ export default function Admin() {
                         {articleCreating ? "Creating..." : "Create New"}
                       </button>
                       <button
-                        onClick={saveArticle}
-                        disabled={articleSaving || !selectedArticleId}
+                        onClick={selectedArticleId ? saveArticle : createArticle}
+                        disabled={(selectedArticleId ? articleSaving : articleCreating) || !articleTitle.trim()}
                         className="inline-flex items-center gap-2 rounded-lg px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 text-emerald-100 disabled:opacity-40"
                       >
                         <Save className="w-4 h-4" />
-                        {articleSaving ? "Saving..." : "Save Changes"}
+                        {selectedArticleId
+                          ? (articleSaving ? "Saving..." : "Save Changes")
+                          : (articleCreating ? "Creating..." : "Save Draft")}
                       </button>
                     </div>
                   </div>
@@ -806,6 +818,60 @@ export default function Admin() {
             }`}
           >
             {msg.text}
+          </div>
+        )}
+
+        {showDeleteModal && selectedArticle && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center px-4">
+            <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-5 space-y-4">
+              <h3 className="text-lg font-semibold text-white">Delete Article</h3>
+              <p className="text-sm text-slate-300">
+                Type the article name to confirm deletion:
+                {" "}
+                <span className="text-white font-medium">{selectedArticle.title}</span>
+              </p>
+
+              <input
+                type="text"
+                value={deleteNameInput}
+                onChange={(e) => setDeleteNameInput(e.target.value)}
+                placeholder="Type article name"
+                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+              />
+
+              <label className="inline-flex items-center gap-2 text-sm text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={deleteAcknowledge}
+                  onChange={(e) => setDeleteAcknowledge(e.target.checked)}
+                />
+                I understand this action cant be undone.
+              </label>
+
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setDeleteNameInput("");
+                    setDeleteAcknowledge(false);
+                  }}
+                  className="rounded-lg px-3 py-2 border border-slate-700 bg-slate-800 text-slate-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={deleteArticle}
+                  disabled={
+                    articleDeleting ||
+                    deleteNameInput !== selectedArticle.title ||
+                    !deleteAcknowledge
+                  }
+                  className="rounded-lg px-3 py-2 border border-red-500/30 bg-red-500/15 text-red-100 disabled:opacity-40"
+                >
+                  {articleDeleting ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

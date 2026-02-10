@@ -20,7 +20,7 @@ export default async function handler(req: any, res: any) {
     const url = process.env.SUPABASE_URL;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !service) {
-      return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+      return res.status(503).json({ error: "Help articles backend not configured." });
     }
 
     const id = String(req.query?.id || "").trim();
@@ -30,7 +30,12 @@ export default async function handler(req: any, res: any) {
 
     if (req.method === "DELETE") {
       const { error } = await supabase.from("help_articles").delete().eq("id", id);
-      if (error) return res.status(500).json({ error: error.message });
+      if (error) {
+        if (error.code === "42P01") {
+          return res.status(400).json({ error: "help_articles table not found. Run DB migrations." });
+        }
+        return res.status(400).json({ error: error.message || "Unable to delete article." });
+      }
       return res.status(200).json({ ok: true });
     }
 
@@ -65,7 +70,13 @@ export default async function handler(req: any, res: any) {
 
       if (error) {
         if (error.code === "23505") return res.status(409).json({ error: "Slug already exists" });
-        return res.status(500).json({ error: error.message });
+        if (error.code === "42P01") {
+          return res.status(400).json({ error: "help_articles table not found. Run DB migrations." });
+        }
+        if (error.code === "42703") {
+          return res.status(400).json({ error: "help_articles schema is outdated. Run DB migrations." });
+        }
+        return res.status(400).json({ error: error.message || "Unable to save article." });
       }
 
       return res.status(200).json({ article: data });
@@ -74,6 +85,6 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err: any) {
     console.error("admin/help-article crash:", err);
-    return res.status(500).json({ error: "Internal error" });
+    return res.status(500).json({ error: "Internal error", detail: String(err?.message || err) });
   }
 }
