@@ -131,6 +131,9 @@ export default function Admin() {
         setArticles([]);
         return;
       }
+      if (warning) {
+        setMsg({ kind: "err", text: warning });
+      }
       setAppAdmin(true);
       setAccessReason(null);
       const list = Array.isArray(j.articles) ? (j.articles as HelpArticle[]) : [];
@@ -293,7 +296,8 @@ export default function Admin() {
 
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setMsg({ kind: "err", text: j.error || j.detail || "Failed to create article." });
+        const detail = j.code ? `${j.error || "Create failed"} (${j.code})` : (j.error || j.detail || "Failed to create article.");
+        setMsg({ kind: "err", text: detail });
         return;
       }
 
@@ -336,7 +340,8 @@ export default function Admin() {
 
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setMsg({ kind: "err", text: j.error || j.detail || "Failed to save article." });
+        const detail = j.code ? `${j.error || "Save failed"} (${j.code})` : (j.error || j.detail || "Failed to save article.");
+        setMsg({ kind: "err", text: detail });
         return;
       }
 
@@ -360,7 +365,8 @@ export default function Admin() {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setMsg({ kind: "err", text: j.error || j.detail || "Failed to delete article." });
+        const detail = j.code ? `${j.error || "Delete failed"} (${j.code})` : (j.error || j.detail || "Failed to delete article.");
+        setMsg({ kind: "err", text: detail });
         return;
       }
 

@@ -157,14 +157,23 @@ export default async function handler(req: any, res: any) {
         .single();
 
       if (error) {
-        if (error.code === "23505") return res.status(409).json({ error: "Slug already exists" });
+        if (error.code === "23505") return res.status(409).json({ error: "Slug already exists", code: error.code });
         if (error.code === "42P01") {
-          return res.status(400).json({ error: "help_articles table not found. Run DB migrations." });
+          return res.status(400).json({
+            error: "help_articles table not found. Run DB migrations.",
+            code: error.code,
+          });
         }
         if (error.code === "42703") {
-          return res.status(400).json({ error: "help_articles schema is outdated. Run DB migrations." });
+          return res.status(400).json({
+            error: "help_articles schema is outdated. Run DB migrations.",
+            code: error.code,
+          });
         }
-        return res.status(400).json({ error: error.message || "Unable to create article." });
+        return res.status(400).json({
+          error: error.message || "Unable to create article.",
+          code: error.code || null,
+        });
       }
       return res.status(200).json({ article: data });
     }
@@ -184,6 +193,7 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({
         error: "Unable to create article.",
         detail,
+        code: "POST_RUNTIME_ERROR",
       });
     }
     return res.status(500).json({ error: "Internal error", detail });
