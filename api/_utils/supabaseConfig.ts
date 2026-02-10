@@ -18,7 +18,11 @@ export function normalizeSupabaseUrl(raw: string | undefined | null): string | n
   const cleaned = stripWrappingQuotes(raw);
   if (!cleaned) return null;
 
-  const candidate = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
+  // Try to recover a valid Supabase origin even if env has extra characters.
+  const embedded = cleaned.match(/https?:\/\/[a-z0-9-]+\.supabase\.co/i)?.[0]
+    || cleaned.match(/[a-z0-9-]+\.supabase\.co/i)?.[0];
+  const base = embedded || cleaned;
+  const candidate = /^https?:\/\//i.test(base) ? base : `https://${base}`;
 
   try {
     const parsed = new URL(candidate);
@@ -29,17 +33,20 @@ export function normalizeSupabaseUrl(raw: string | undefined | null): string | n
 }
 
 export function getSupabaseServiceConfig(): SupabaseConfigResult {
-  const rawUrl =
-    process.env.SUPABASE_URL ||
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL;
+  const rawCandidates = [
+    process.env.SUPABASE_URL,
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.VITE_SUPABASE_URL,
+  ];
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
   if (!serviceKey) {
     return { ok: false, error: "Missing SUPABASE_SERVICE_ROLE_KEY" };
   }
 
-  const url = normalizeSupabaseUrl(rawUrl);
+  const url = rawCandidates
+    .map((candidate) => normalizeSupabaseUrl(candidate))
+    .find((candidate) => !!candidate) || null;
   if (!url) {
     return {
       ok: false,
