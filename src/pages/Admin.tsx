@@ -328,7 +328,7 @@ export default function Admin() {
     setArticleSaving(true);
     setMsg(null);
     try {
-      const r = await adminFetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
+      const r = await adminFetch(`/api/admin/help-articles?id=${encodeURIComponent(selectedArticleId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -365,7 +365,7 @@ export default function Admin() {
     setArticleDeleting(true);
     setMsg(null);
     try {
-      const r = await adminFetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
+      const r = await adminFetch(`/api/admin/help-articles?id=${encodeURIComponent(selectedArticleId)}`, {
         method: "DELETE",
       });
       const j = await r.json().catch(() => ({}));
