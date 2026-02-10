@@ -27,6 +27,11 @@ export default async function handler(req: any, res: any) {
     });
   } catch (err: any) {
     console.error("admin/me runtime crash:", err);
-    return res.status(500).json({ error: "Internal error", detail: String(err?.message || err) });
+    return res.status(200).json({
+      authed: false,
+      appAdmin: false,
+      reason: "Admin status check failed at runtime.",
+      detail: String(err?.message || err),
+    });
   }
 }

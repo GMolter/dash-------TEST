@@ -194,7 +194,7 @@ export default function Admin() {
 
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      setLoginErr(j.error || "Login failed");
+      setLoginErr(j.error || j.detail || "Login failed");
       return;
     }
 

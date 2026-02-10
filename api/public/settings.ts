@@ -33,7 +33,12 @@ export default async function handler(_req: any, res: any) {
           warning: "app_settings table not found.",
         });
       }
-      return res.status(500).json({ error: error.message });
+      return res.status(200).json({
+        bannerEnabled: false,
+        bannerText: "",
+        updatedAt: null,
+        warning: error.message || "Failed to load app settings.",
+      });
     }
 
     return res.status(200).json({
@@ -43,6 +48,11 @@ export default async function handler(_req: any, res: any) {
     });
   } catch (err: any) {
     console.error("public/settings crash:", err);
-    return res.status(500).json({ error: "Internal error" });
+    return res.status(200).json({
+      bannerEnabled: false,
+      bannerText: "",
+      updatedAt: null,
+      warning: "Settings endpoint fallback due to runtime error.",
+    });
   }
 }
