@@ -1,6 +1,7 @@
 export const config = { runtime: "nodejs" };
 
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseServiceConfig } from "../_utils/supabaseConfig";
 
 function b64urlFromBase64(b64: string) {
   return b64.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
@@ -84,39 +85,23 @@ export default async function handler(req: any, res: any) {
   const isGet = req.method === "GET";
 
   try {
-    const url = process.env.SUPABASE_URL;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!url || !service) {
+    const cfg = getSupabaseServiceConfig();
+    if (!cfg.ok) {
       if (isGet) {
         return res.status(200).json({
           articles: [],
-          warning: "Help articles backend not configured.",
-        });
-      }
-      return res.status(503).json({ error: "Help articles backend not configured." });
-    }
-
-    try {
-      // Fail early with a clear message if env URL is malformed.
-      new URL(url);
-    } catch (urlErr: any) {
-      const detail = String(urlErr?.message || urlErr);
-      if (isGet) {
-        return res.status(200).json({
-          articles: [],
-          warning: "SUPABASE_URL is invalid.",
-          detail,
+          warning: cfg.error,
+          detail: cfg.detail || "",
         });
       }
       return res.status(503).json({
-        error: "SUPABASE_URL is invalid.",
-        detail,
-        code: "INVALID_SUPABASE_URL",
+        error: cfg.error,
+        detail: cfg.detail || "",
+        code: "INVALID_SUPABASE_CONFIG",
       });
     }
 
-    const supabase = createClient(url, service);
+    const supabase = createClient(cfg.url, cfg.serviceKey);
 
     const hasSession = await hasValidAdminPasswordSession(req);
     if (!hasSession) {

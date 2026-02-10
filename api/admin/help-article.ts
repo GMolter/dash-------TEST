@@ -2,6 +2,7 @@ export const config = { runtime: "nodejs" };
 
 import { createClient } from "@supabase/supabase-js";
 import { requireAdminAccess } from "../_utils/adminAccess";
+import { getSupabaseServiceConfig } from "../_utils/supabaseConfig";
 
 function toSlug(input: string) {
   return input
@@ -17,16 +18,15 @@ export default async function handler(req: any, res: any) {
     const access = await requireAdminAccess(req, { requirePasswordSession: true });
     if (!access.ok) return res.status(access.status).json({ error: access.error });
 
-    const url = process.env.SUPABASE_URL;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !service) {
-      return res.status(503).json({ error: "Help articles backend not configured." });
+    const cfg = getSupabaseServiceConfig();
+    if (!cfg.ok) {
+      return res.status(503).json({ error: cfg.error, detail: cfg.detail || "" });
     }
 
     const id = String(req.query?.id || "").trim();
     if (!id) return res.status(400).json({ error: "Missing id" });
 
-    const supabase = createClient(url, service);
+    const supabase = createClient(cfg.url, cfg.serviceKey);
 
     if (req.method === "DELETE") {
       const { error } = await supabase.from("help_articles").delete().eq("id", id);

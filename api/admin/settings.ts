@@ -2,6 +2,7 @@ export const config = { runtime: "nodejs" };
 
 import { createClient } from "@supabase/supabase-js";
 import { requireAdminAccess } from "../_utils/adminAccess";
+import { getSupabaseServiceConfig } from "../_utils/supabaseConfig";
 
 export default async function handler(req: any, res: any) {
   try {
@@ -9,9 +10,8 @@ export default async function handler(req: any, res: any) {
     const access = await requireAdminAccess(req, { requirePasswordSession: true });
     if (!access.ok) return res.status(access.status).json({ error: access.error });
 
-    const url = process.env.SUPABASE_URL;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !service) return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+    const cfg = getSupabaseServiceConfig();
+    if (!cfg.ok) return res.status(503).json({ error: cfg.error, detail: cfg.detail || "" });
 
     const { bannerEnabled, bannerText } = req.body || {};
     const hasBannerEnabled = bannerEnabled !== undefined;
@@ -26,7 +26,7 @@ export default async function handler(req: any, res: any) {
     if (hasBannerText && typeof bannerText !== "string") {
       return res.status(400).json({ error: "bannerText must be string" });
     }
-    const supabase = createClient(url, service);
+    const supabase = createClient(cfg.url, cfg.serviceKey);
     const { data: existing, error: readError } = await supabase
       .from("app_settings")
       .select("banner_enabled,banner_text")

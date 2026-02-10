@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { isAuthed } from "./session";
+import { getSupabaseServiceConfig } from "./supabaseConfig";
 
 type AccessResult =
   | { ok: true; userId: string; email: string | null }
@@ -13,9 +14,8 @@ function readBearerToken(req: any) {
 }
 
 export async function resolveAppAdminFromRequest(req: any): Promise<AccessResult> {
-  const url = process.env.SUPABASE_URL;
-  const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !service) {
+  const cfg = getSupabaseServiceConfig();
+  if (!cfg.ok) {
     return { ok: false, status: 403, error: "Unauthorized Account" };
   }
 
@@ -28,7 +28,7 @@ export async function resolveAppAdminFromRequest(req: any): Promise<AccessResult
     };
   }
 
-  const supabase = createClient(url, service);
+  const supabase = createClient(cfg.url, cfg.serviceKey);
   const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
   if (userError || !userData.user) {
     return { ok: false, status: 401, error: "Invalid auth session" };

@@ -1,16 +1,16 @@
 export const config = { runtime: "nodejs" };
 
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseServiceConfig } from "../_utils/supabaseConfig";
 
 export default async function handler(_req: any, res: any) {
   try {
-    const url = process.env.SUPABASE_URL;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !service) {
-      return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
+    const cfg = getSupabaseServiceConfig();
+    if (!cfg.ok) {
+      return res.status(503).json({ error: cfg.error, detail: cfg.detail || "" });
     }
 
-    const supabase = createClient(url, service);
+    const supabase = createClient(cfg.url, cfg.serviceKey);
     const { data, error } = await supabase
       .from("help_articles")
       .select("id,slug,title,summary,updated_at")

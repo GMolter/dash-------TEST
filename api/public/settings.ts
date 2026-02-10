@@ -1,21 +1,22 @@
 export const config = { runtime: "nodejs" };
 
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseServiceConfig } from "../_utils/supabaseConfig";
 
 export default async function handler(_req: any, res: any) {
   try {
-    const url = process.env.SUPABASE_URL;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !service) {
+    const cfg = getSupabaseServiceConfig();
+    if (!cfg.ok) {
       return res.status(200).json({
         bannerEnabled: false,
         bannerText: "",
         updatedAt: null,
-        warning: "Settings backend is not configured.",
+        warning: cfg.error,
+        detail: cfg.detail || "",
       });
     }
 
-    const supabase = createClient(url, service);
+    const supabase = createClient(cfg.url, cfg.serviceKey);
 
     const { data, error } = await supabase
       .from("app_settings")
