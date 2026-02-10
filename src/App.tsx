@@ -20,6 +20,7 @@ import { OrgSetup } from './pages/OrgSetup';
 import { OrganizationPage } from './pages/OrganizationPage';
 import { ProfileSettings } from './pages/ProfileSettings';
 import { HelpPage } from './pages/HelpPage';
+import { HelpArticlePage } from './pages/HelpArticlePage';
 import { useAuth } from './hooks/useAuth';
 import { useOrg } from './hooks/useOrg';
 import { Home, Wrench, Menu, X, AlertTriangle, Building2, UserCircle } from 'lucide-react';
@@ -31,6 +32,7 @@ type View =
   | { type: 'organization' }
   | { type: 'profile' }
   | { type: 'help' }
+  | { type: 'help-article'; slug: string }
   | { type: 'tool'; tool: string }
   | { type: 'redirect'; code: string }
   | { type: 'secret'; code: string }
@@ -151,6 +153,12 @@ function App() {
 
       if (cleanPath === '/help') {
         setView({ type: 'help' });
+        return;
+      }
+      if (cleanPath.startsWith('/help/article/')) {
+        const slug = cleanPath.replace('/help/article/', '').split('/')[0];
+        if (slug) setView({ type: 'help-article', slug });
+        else setView({ type: 'tool', tool: 'notfound' });
         return;
       }
 
@@ -308,6 +316,10 @@ function App() {
 
   if (view.type === 'help') {
     return <HelpPage />;
+  }
+
+  if (view.type === 'help-article') {
+    return <HelpArticlePage slug={view.slug} />;
   }
 
   if (isPublicRoute) {

@@ -43,12 +43,11 @@ export default async function handler(req: any, res: any) {
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !service) return res.status(500).json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" });
 
-    const { bannerEnabled, bannerText, helpDocs } = req.body || {};
+    const { bannerEnabled, bannerText } = req.body || {};
     const hasBannerEnabled = bannerEnabled !== undefined;
     const hasBannerText = bannerText !== undefined;
-    const hasHelpDocs = helpDocs !== undefined;
 
-    if (!hasBannerEnabled && !hasBannerText && !hasHelpDocs) {
+    if (!hasBannerEnabled && !hasBannerText) {
       return res.status(400).json({ error: "No settings provided" });
     }
     if (hasBannerEnabled && typeof bannerEnabled !== "boolean") {
@@ -57,14 +56,10 @@ export default async function handler(req: any, res: any) {
     if (hasBannerText && typeof bannerText !== "string") {
       return res.status(400).json({ error: "bannerText must be string" });
     }
-    if (hasHelpDocs && typeof helpDocs !== "string") {
-      return res.status(400).json({ error: "helpDocs must be string" });
-    }
-
     const supabase = createClient(url, service);
     const { data: existing, error: readError } = await supabase
       .from("app_settings")
-      .select("banner_enabled,banner_text,help_docs")
+      .select("banner_enabled,banner_text")
       .eq("id", "global")
       .maybeSingle();
 
@@ -76,7 +71,6 @@ export default async function handler(req: any, res: any) {
         id: "global",
         banner_enabled: hasBannerEnabled ? bannerEnabled : !!existing?.banner_enabled,
         banner_text: hasBannerText ? bannerText : existing?.banner_text || "",
-        help_docs: hasHelpDocs ? helpDocs : existing?.help_docs || "",
         updated_at: new Date().toISOString(),
       });
 

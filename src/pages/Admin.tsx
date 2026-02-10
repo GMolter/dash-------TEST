@@ -9,6 +9,8 @@ import {
   Settings,
   RefreshCw,
   BookOpenText,
+  Plus,
+  Trash2,
 } from "lucide-react";
 
 type BannerState = {
@@ -18,6 +20,27 @@ type BannerState = {
 
 type AdminTab = "overview" | "banner" | "help-docs";
 
+type HelpArticle = {
+  id: string;
+  slug: string;
+  title: string;
+  summary: string;
+  content: string;
+  is_published: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+function slugify(input: string) {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
 export default function Admin() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
@@ -26,11 +49,24 @@ export default function Admin() {
   const [loginErr, setLoginErr] = useState<string | null>(null);
 
   const [banner, setBanner] = useState<BannerState>({ enabled: false, text: "" });
-  const [helpDocs, setHelpDocs] = useState("");
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [bannerLoading, setBannerLoading] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(false);
   const [bannerSaving, setBannerSaving] = useState(false);
-  const [helpSaving, setHelpSaving] = useState(false);
+
+  const [articles, setArticles] = useState<HelpArticle[]>([]);
+  const [loadingArticles, setLoadingArticles] = useState(false);
+  const [articleSaving, setArticleSaving] = useState(false);
+  const [articleCreating, setArticleCreating] = useState(false);
+  const [articleDeleting, setArticleDeleting] = useState(false);
+  const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
+
+  const [articleTitle, setArticleTitle] = useState("");
+  const [articleSlug, setArticleSlug] = useState("");
+  const [articleSummary, setArticleSummary] = useState("");
+  const [articleContent, setArticleContent] = useState("");
+  const [articlePublished, setArticlePublished] = useState(false);
+  const [articleSortOrder, setArticleSortOrder] = useState(0);
+
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const canSaveBanner = useMemo(() => {
@@ -38,7 +74,10 @@ export default function Admin() {
     return banner.text.trim().length > 0;
   }, [banner.enabled, banner.text]);
 
-  const helpPreview = useMemo(() => helpDocs.trim(), [helpDocs]);
+  const selectedArticle = useMemo(
+    () => articles.find((a) => a.id === selectedArticleId) || null,
+    [articles, selectedArticleId]
+  );
 
   async function refreshAuth() {
     const r = await fetch("/api/admin/me", { credentials: "include" });
@@ -47,28 +86,69 @@ export default function Admin() {
       const j = JSON.parse(text);
       setAuthed(Boolean(j.authed));
     } catch {
-      console.error("Non-JSON response from /api/admin/me:", text);
       setAuthed(false);
     }
   }
 
   async function loadSettings() {
-    setBannerLoading(true);
-    setMsg(null);
+    setLoadingSettings(true);
     try {
       const r = await fetch("/api/public/settings");
       const j = await r.json();
-      setBanner({
-        enabled: !!j.bannerEnabled,
-        text: j.bannerText || "",
-      });
-      setHelpDocs(j.helpDocs || "");
+      setBanner({ enabled: !!j.bannerEnabled, text: j.bannerText || "" });
       setUpdatedAt(j.updatedAt || null);
     } catch {
       setMsg({ kind: "err", text: "Could not load app settings." });
     } finally {
-      setBannerLoading(false);
+      setLoadingSettings(false);
     }
+  }
+
+  async function loadArticles(preferredId?: string) {
+    setLoadingArticles(true);
+    try {
+      const r = await fetch("/api/admin/help-articles", { credentials: "include" });
+      const j = await r.json();
+      const list = Array.isArray(j.articles) ? (j.articles as HelpArticle[]) : [];
+      setArticles(list);
+
+      const targetId = preferredId || selectedArticleId;
+      if (targetId) {
+        const match = list.find((x) => x.id === targetId);
+        if (match) {
+          hydrateEditor(match);
+        } else {
+          if (list.length > 0) hydrateEditor(list[0]);
+          else clearEditor();
+        }
+      } else if (list.length > 0) {
+        hydrateEditor(list[0]);
+      }
+    } catch {
+      setMsg({ kind: "err", text: "Could not load help articles." });
+    } finally {
+      setLoadingArticles(false);
+    }
+  }
+
+  function clearEditor() {
+    setSelectedArticleId(null);
+    setArticleTitle("");
+    setArticleSlug("");
+    setArticleSummary("");
+    setArticleContent("");
+    setArticlePublished(false);
+    setArticleSortOrder(0);
+  }
+
+  function hydrateEditor(article: HelpArticle) {
+    setSelectedArticleId(article.id);
+    setArticleTitle(article.title);
+    setArticleSlug(article.slug);
+    setArticleSummary(article.summary || "");
+    setArticleContent(article.content || "");
+    setArticlePublished(!!article.is_published);
+    setArticleSortOrder(Number(article.sort_order || 0));
   }
 
   useEffect(() => {
@@ -76,7 +156,9 @@ export default function Admin() {
   }, []);
 
   useEffect(() => {
-    if (authed) loadSettings();
+    if (!authed) return;
+    loadSettings();
+    loadArticles();
   }, [authed]);
 
   async function login(e: React.FormEvent) {
@@ -118,22 +200,11 @@ export default function Admin() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          bannerEnabled: banner.enabled,
-          bannerText: banner.text,
-        }),
+        body: JSON.stringify({ bannerEnabled: banner.enabled, bannerText: banner.text }),
       });
-
-      const text = await r.text();
+      const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        let errorMessage = "Failed to save banner.";
-        try {
-          const j = JSON.parse(text);
-          errorMessage = j.error || errorMessage;
-        } catch {
-          // ignore json parse error
-        }
-        setMsg({ kind: "err", text: errorMessage });
+        setMsg({ kind: "err", text: j.error || "Failed to save banner." });
         return;
       }
 
@@ -146,38 +217,112 @@ export default function Admin() {
     }
   }
 
-  async function saveHelpDocs() {
-    setHelpSaving(true);
+  async function createArticle() {
+    const title = articleTitle.trim();
+    if (!title) {
+      setMsg({ kind: "err", text: "Article title is required." });
+      return;
+    }
+
+    setArticleCreating(true);
     setMsg(null);
     try {
-      const r = await fetch("/api/admin/settings", {
+      const r = await fetch("/api/admin/help-articles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          helpDocs,
+          title,
+          slug: articleSlug,
+          summary: articleSummary,
+          content: articleContent,
+          isPublished: articlePublished,
+          sortOrder: articleSortOrder,
         }),
       });
 
-      const text = await r.text();
+      const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        let errorMessage = "Failed to save help docs.";
-        try {
-          const j = JSON.parse(text);
-          errorMessage = j.error || errorMessage;
-        } catch {
-          // ignore json parse error
-        }
-        setMsg({ kind: "err", text: errorMessage });
+        setMsg({ kind: "err", text: j.error || "Failed to create article." });
         return;
       }
 
-      await loadSettings();
-      setMsg({ kind: "ok", text: "Help documentation updated." });
+      const created = j.article as HelpArticle;
+      await loadArticles(created?.id);
+      setMsg({ kind: "ok", text: "Article created." });
     } catch {
-      setMsg({ kind: "err", text: "Network error while saving docs." });
+      setMsg({ kind: "err", text: "Network error while creating article." });
     } finally {
-      setHelpSaving(false);
+      setArticleCreating(false);
+    }
+  }
+
+  async function saveArticle() {
+    if (!selectedArticleId) {
+      setMsg({ kind: "err", text: "Select an article first." });
+      return;
+    }
+    const title = articleTitle.trim();
+    if (!title) {
+      setMsg({ kind: "err", text: "Article title is required." });
+      return;
+    }
+
+    setArticleSaving(true);
+    setMsg(null);
+    try {
+      const r = await fetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          title,
+          slug: articleSlug,
+          summary: articleSummary,
+          content: articleContent,
+          isPublished: articlePublished,
+          sortOrder: articleSortOrder,
+        }),
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsg({ kind: "err", text: j.error || "Failed to save article." });
+        return;
+      }
+
+      await loadArticles();
+      setMsg({ kind: "ok", text: "Article updated." });
+    } catch {
+      setMsg({ kind: "err", text: "Network error while saving article." });
+    } finally {
+      setArticleSaving(false);
+    }
+  }
+
+  async function deleteArticle() {
+    if (!selectedArticleId) return;
+
+    setArticleDeleting(true);
+    setMsg(null);
+    try {
+      const r = await fetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsg({ kind: "err", text: j.error || "Failed to delete article." });
+        return;
+      }
+
+      await loadArticles();
+      clearEditor();
+      setMsg({ kind: "ok", text: "Article deleted." });
+    } catch {
+      setMsg({ kind: "err", text: "Network error while deleting article." });
+    } finally {
+      setArticleDeleting(false);
     }
   }
 
@@ -243,7 +388,7 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
-      <div className="relative z-10 max-w-6xl mx-auto px-6 py-10 space-y-6">
+      <div className="relative z-10 max-w-7xl mx-auto px-6 py-10 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
@@ -251,18 +396,21 @@ export default function Admin() {
             </div>
             <div>
               <h1 className="text-2xl font-semibold text-blue-200">App Admin Panel</h1>
-              <p className="text-sm text-slate-400">Platform-level controls and publishing.</p>
+              <p className="text-sm text-slate-400">Platform-level controls and help publishing.</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <button
-              onClick={loadSettings}
-              disabled={bannerLoading}
+              onClick={() => {
+                loadSettings();
+                loadArticles();
+              }}
+              disabled={loadingSettings || loadingArticles}
               className="inline-flex items-center gap-2 rounded-xl px-3 py-2 bg-slate-900/70 hover:bg-slate-800 border border-slate-700 text-slate-100 transition disabled:opacity-50"
             >
               <RefreshCw className="w-4 h-4" />
-              {bannerLoading ? "Refreshing..." : "Refresh"}
+              {loadingSettings || loadingArticles ? "Refreshing..." : "Refresh"}
             </button>
             <button
               onClick={logout}
@@ -307,7 +455,7 @@ export default function Admin() {
               }`}
             >
               <BookOpenText className="w-4 h-4" />
-              Help Docs
+              Help Articles
             </button>
           </div>
 
@@ -315,25 +463,19 @@ export default function Admin() {
             {activeTab === "overview" && (
               <section className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-100">Overview</h2>
-                <p className="text-sm text-slate-400">
-                  Manage app-wide content and announcements from one place.
-                </p>
-                <div className="grid gap-4 md:grid-cols-2">
+                <p className="text-sm text-slate-400">Manage global app announcements and published help resources.</p>
+                <div className="grid gap-4 md:grid-cols-3">
                   <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-4">
                     <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">Banner Status</div>
                     <div className="text-sm text-slate-100">{banner.enabled ? "Enabled" : "Disabled"}</div>
-                    <div className="mt-1 text-xs text-slate-400">
-                      {banner.enabled
-                        ? "A maintenance notice is currently visible."
-                        : "No maintenance notice is visible."}
-                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-4">
+                    <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">Published Articles</div>
+                    <div className="text-sm text-slate-100">{articles.filter((a) => a.is_published).length}</div>
                   </div>
                   <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-4">
                     <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">Last Settings Update</div>
                     <div className="text-sm text-slate-100">{formatUpdatedAt(updatedAt)}</div>
-                    <div className="mt-1 text-xs text-slate-400">
-                      Includes banner and help documentation changes.
-                    </div>
                   </div>
                 </div>
               </section>
@@ -347,9 +489,7 @@ export default function Admin() {
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-slate-100">Maintenance Banner</h2>
-                    <p className="text-sm text-slate-400">
-                      Show a temporary notice at the top of the main app shell.
-                    </p>
+                    <p className="text-sm text-slate-400">Show a temporary notice at the top of the main app shell.</p>
                   </div>
                 </div>
 
@@ -358,9 +498,7 @@ export default function Admin() {
                     <button
                       onClick={() => setBanner((b) => ({ ...b, enabled: !b.enabled }))}
                       className={`w-12 h-7 rounded-full border transition relative ${
-                        banner.enabled
-                          ? "bg-amber-500/20 border-amber-500/40"
-                          : "bg-slate-900/60 border-slate-700/70"
+                        banner.enabled ? "bg-amber-500/20 border-amber-500/40" : "bg-slate-900/60 border-slate-700/70"
                       }`}
                       aria-label="Toggle banner"
                     >
@@ -371,9 +509,7 @@ export default function Admin() {
                       />
                     </button>
                     <div>
-                      <div className="text-sm text-slate-200 font-medium">
-                        {banner.enabled ? "Enabled" : "Disabled"}
-                      </div>
+                      <div className="text-sm text-slate-200 font-medium">{banner.enabled ? "Enabled" : "Disabled"}</div>
                       <div className="text-xs text-slate-500">Disabled state hides all banner text.</div>
                     </div>
                   </div>
@@ -397,19 +533,13 @@ export default function Admin() {
                     className="mt-2 w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none focus:border-amber-500/40"
                     placeholder="Scheduled maintenance tonight at 2:00 AM."
                   />
-                  {!canSaveBanner && (
-                    <div className="mt-2 text-xs text-amber-300">
-                      Banner text cannot be empty when enabled.
-                    </div>
-                  )}
+                  {!canSaveBanner && <div className="mt-2 text-xs text-amber-300">Banner text cannot be empty when enabled.</div>}
                 </div>
 
                 <div className="rounded-xl bg-slate-900/50 border border-slate-700/70 p-3">
                   <div className="text-xs text-slate-400 mb-1">Preview</div>
                   {banner.enabled && banner.text.trim() ? (
-                    <div className="border border-amber-500/20 bg-amber-500/10 text-amber-200 rounded-lg px-3 py-2 text-sm">
-                      {banner.text}
-                    </div>
+                    <div className="border border-amber-500/20 bg-amber-500/10 text-amber-200 rounded-lg px-3 py-2 text-sm">{banner.text}</div>
                   ) : (
                     <div className="text-sm text-slate-500">Banner is hidden.</div>
                   )}
@@ -418,48 +548,160 @@ export default function Admin() {
             )}
 
             {activeTab === "help-docs" && (
-              <section className="space-y-5">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                    <FileText className="w-4 h-4 text-blue-300" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-100">Help Documentation</h2>
-                    <p className="text-sm text-slate-400">
-                      Content published here is shown on the standalone <code>/help</code> page.
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm text-slate-300">Docs content</label>
-                  <textarea
-                    value={helpDocs}
-                    onChange={(e) => setHelpDocs(e.target.value)}
-                    rows={14}
-                    className="mt-2 w-full rounded-xl bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none focus:border-blue-500/40"
-                    placeholder="Add internal docs, support notes, links, and common procedures."
-                  />
-                </div>
-
-                <div className="flex items-center justify-end">
+              <section className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+                <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-3 space-y-2">
                   <button
-                    onClick={saveHelpDocs}
-                    disabled={helpSaving}
-                    className="inline-flex items-center gap-2 rounded-xl px-4 py-2 bg-blue-500/15 border border-blue-500/30 hover:border-blue-400/40 text-white transition disabled:opacity-50"
+                    onClick={() => {
+                      clearEditor();
+                      setArticleTitle("New Help Article");
+                      setArticleSlug("new-help-article");
+                      setArticleSummary("");
+                      setArticleContent("");
+                      setArticlePublished(false);
+                      setArticleSortOrder(0);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 bg-blue-500/15 border border-blue-500/30 hover:border-blue-400/40 text-blue-100 text-sm"
                   >
-                    <Save className="w-4 h-4" />
-                    {helpSaving ? "Saving..." : "Save Docs"}
+                    <Plus className="w-4 h-4" />
+                    New Article Draft
                   </button>
+
+                  <div className="text-xs text-slate-400 px-1 pt-2">Articles</div>
+                  <div className="max-h-[460px] overflow-auto space-y-1 pr-1">
+                    {loadingArticles ? (
+                      <div className="text-sm text-slate-400 px-2 py-2">Loading...</div>
+                    ) : articles.length === 0 ? (
+                      <div className="text-sm text-slate-500 px-2 py-2">No articles yet.</div>
+                    ) : (
+                      articles.map((article) => (
+                        <button
+                          key={article.id}
+                          onClick={() => hydrateEditor(article)}
+                          className={`w-full text-left rounded-lg border px-3 py-2 text-sm transition ${
+                            selectedArticleId === article.id
+                              ? "bg-blue-500/15 border-blue-500/35 text-blue-100"
+                              : "bg-slate-950/60 border-slate-700/70 text-slate-200 hover:bg-slate-900/70"
+                          }`}
+                        >
+                          <div className="font-medium truncate">{article.title}</div>
+                          <div className="text-xs text-slate-400 truncate">/help/article/{article.slug}</div>
+                        </button>
+                      ))
+                    )}
+                  </div>
                 </div>
 
-                <div className="rounded-xl bg-slate-900/50 border border-slate-700/70 p-3">
-                  <div className="text-xs text-slate-400 mb-1">Live preview</div>
-                  {helpPreview ? (
-                    <pre className="whitespace-pre-wrap text-sm text-slate-100 font-sans">{helpPreview}</pre>
-                  ) : (
-                    <div className="text-sm text-slate-500">No docs content yet.</div>
-                  )}
+                <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-white">
+                      <FileText className="w-4 h-4 text-blue-300" />
+                      <h2 className="text-lg font-semibold">Article Editor</h2>
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      {selectedArticle ? `Updated ${formatUpdatedAt(selectedArticle.updated_at)}` : "Unsaved draft"}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm text-slate-300">Title</label>
+                      <input
+                        value={articleTitle}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setArticleTitle(next);
+                          if (!selectedArticleId) setArticleSlug(slugify(next));
+                        }}
+                        className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                        placeholder="How to onboard a new member"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-slate-300">Slug</label>
+                      <input
+                        value={articleSlug}
+                        onChange={(e) => setArticleSlug(slugify(e.target.value))}
+                        className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                        placeholder="how-to-onboard-a-new-member"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-sm text-slate-300">Summary</label>
+                      <input
+                        value={articleSummary}
+                        onChange={(e) => setArticleSummary(e.target.value)}
+                        className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                        placeholder="Quick summary shown in Help index"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-300">Sort Order</label>
+                      <input
+                        type="number"
+                        value={articleSortOrder}
+                        onChange={(e) => setArticleSortOrder(Number(e.target.value) || 0)}
+                        className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="inline-flex items-center gap-2 text-sm text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={articlePublished}
+                      onChange={(e) => setArticlePublished(e.target.checked)}
+                    />
+                    Published (visible at <code>/help</code>)
+                  </label>
+
+                  <div>
+                    <label className="block text-sm text-slate-300">Content</label>
+                    <textarea
+                      rows={14}
+                      value={articleContent}
+                      onChange={(e) => setArticleContent(e.target.value)}
+                      className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                      placeholder="Use plain text for now."
+                    />
+                  </div>
+
+                  <div className="rounded-lg bg-slate-950/60 border border-slate-700/70 px-3 py-2 text-xs text-slate-400">
+                    Public URL: {articleSlug ? `/help/article/${articleSlug}` : "set a slug first"}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <button
+                      onClick={deleteArticle}
+                      disabled={!selectedArticleId || articleDeleting}
+                      className="inline-flex items-center gap-2 rounded-lg px-3 py-2 border border-red-500/30 bg-red-500/10 text-red-200 disabled:opacity-40"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      {articleDeleting ? "Deleting..." : "Delete"}
+                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={createArticle}
+                        disabled={articleCreating || !articleTitle.trim()}
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 border border-blue-500/30 bg-blue-500/10 text-blue-100 disabled:opacity-40"
+                      >
+                        <Plus className="w-4 h-4" />
+                        {articleCreating ? "Creating..." : "Create New"}
+                      </button>
+                      <button
+                        onClick={saveArticle}
+                        disabled={articleSaving || !selectedArticleId}
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-2 border border-emerald-500/30 bg-emerald-500/10 text-emerald-100 disabled:opacity-40"
+                      >
+                        <Save className="w-4 h-4" />
+                        {articleSaving ? "Saving..." : "Save Changes"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </section>
             )}
