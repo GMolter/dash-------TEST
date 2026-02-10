@@ -12,7 +12,7 @@ import {
   BookOpenText,
   Plus,
   Trash2,
-  CircleHelp,
+  HelpCircle,
 } from "lucide-react";
 
 type BannerState = {
@@ -656,7 +656,7 @@ export default function Admin() {
                             title="Lower numbers appear first in /help. If equal, newer updates appear first."
                             className="inline-flex items-center text-slate-400 cursor-help"
                           >
-                            <CircleHelp className="w-4 h-4" />
+                            <HelpCircle className="w-4 h-4" />
                           </span>
                         </span>
                       </label>
