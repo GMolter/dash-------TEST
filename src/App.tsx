@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AnimatedBackground } from './components/AnimatedBackground';
 import { Quicklinks } from './components/Quicklinks';
-import { Triggers } from './components/Triggers';
 import { URLShortener } from './components/URLShortener';
 import { SecretSharing } from './components/SecretSharing';
 import { QRCodeGenerator } from './components/QRCodeGenerator';
@@ -246,7 +245,7 @@ function App() {
   const utilities = [
     { id: 'quicklinks', label: 'Quick Links', icon: '🔗', desc: 'Manage bookmarks' },
     { id: 'projects', label: 'Projects', icon: '📁', desc: 'Track your work' },
-    { id: 'triggers', label: 'Triggers', icon: '⚡', desc: 'Run webhooks' },
+    { id: 'triggers', label: 'Help Center', icon: '📚', desc: 'Browse docs and guides' },
     { id: 'shortener', label: 'URL Shortener', icon: '✂️', desc: 'Shorten URLs' },
     { id: 'secrets', label: 'Secret Sharing', icon: '🔒', desc: 'One-time links' },
     { id: 'qr', label: 'QR Generator', icon: '📱', desc: 'Generate QR codes' },
@@ -281,7 +280,6 @@ function App() {
           </button>
 
           {view.tool === 'quicklinks' && <Quicklinks editMode={true} />}
-          {view.tool === 'triggers' && <Triggers />}
           {view.tool === 'shortener' && <URLShortener />}
           {view.tool === 'secrets' && <SecretSharing />}
           {view.tool === 'qr' && <QRCodeGenerator />}
@@ -296,6 +294,8 @@ function App() {
         onOpenTool={(toolId) => {
           if (toolId === 'projects') {
             navigateTo('/projects');
+          } else if (toolId === 'triggers') {
+            navigateTo('/help');
           } else {
             setView({ type: 'tool', tool: toolId });
           }
