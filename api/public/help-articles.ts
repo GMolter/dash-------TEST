@@ -19,7 +19,12 @@ export default async function handler(_req: any, res: any) {
       .order("sort_order", { ascending: true })
       .order("updated_at", { ascending: false });
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      if (error.code === "42P01" || error.code === "42703") {
+        return res.status(200).json({ articles: [], warning: "Help articles are not set up yet." });
+      }
+      return res.status(500).json({ error: error.message || "Unable to load help articles." });
+    }
     return res.status(200).json({ articles: data || [] });
   } catch (err: any) {
     console.error("public/help-articles crash:", err);

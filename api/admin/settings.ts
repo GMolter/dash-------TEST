@@ -13,7 +13,7 @@ function parseBody(raw: any) {
       return {};
     }
   }
-  if (Buffer.isBuffer(raw)) {
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(raw)) {
     try {
       return JSON.parse(raw.toString("utf8"));
     } catch {
@@ -47,31 +47,13 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: "bannerText must be string" });
     }
     const supabase = createClient(cfg.url, cfg.serviceKey);
-    const { data: existing, error: readError } = await supabase
-      .from("app_settings")
-      .select("banner_enabled,banner_text")
-      .eq("id", "global")
-      .maybeSingle();
-
-    if (readError) {
-      if (readError.code === "42P01" || readError.code === "42703") {
-        return res.status(400).json({
-          error: "app_settings schema is outdated. Run DB migrations.",
-          code: readError.code,
-        });
-      }
-      return res.status(400).json({
-        error: readError.message || "Unable to load settings.",
-        code: readError.code || null,
-      });
-    }
 
     const { error } = await supabase
       .from("app_settings")
       .upsert({
         id: "global",
-        banner_enabled: hasBannerEnabled ? bannerEnabled : !!existing?.banner_enabled,
-        banner_text: hasBannerText ? bannerText : existing?.banner_text || "",
+        banner_enabled: hasBannerEnabled ? bannerEnabled : false,
+        banner_text: hasBannerText ? bannerText : "",
         updated_at: new Date().toISOString(),
       }, { onConflict: "id" });
 
