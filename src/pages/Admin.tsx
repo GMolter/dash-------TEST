@@ -118,6 +118,7 @@ export default function Admin() {
       const r = await adminFetch("/api/admin/help-articles");
       const j = await r.json();
       const warning = typeof j.warning === "string" ? j.warning : "";
+      const warningDetail = typeof j.detail === "string" ? j.detail : "";
 
       if (!r.ok) {
         setAppAdmin(false);
@@ -132,7 +133,7 @@ export default function Admin() {
         return;
       }
       if (warning) {
-        setMsg({ kind: "err", text: warning });
+        setMsg({ kind: "err", text: warningDetail ? `${warning} ${warningDetail}` : warning });
       }
       setAppAdmin(true);
       setAccessReason(null);
@@ -296,8 +297,10 @@ export default function Admin() {
 
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const detail = j.code ? `${j.error || "Create failed"} (${j.code})` : (j.error || j.detail || "Failed to create article.");
-        setMsg({ kind: "err", text: detail });
+        const base = j.error || "Failed to create article.";
+        const codePart = j.code ? ` (${j.code})` : "";
+        const detailPart = j.detail ? ` ${j.detail}` : "";
+        setMsg({ kind: "err", text: `${base}${codePart}${detailPart}` });
         return;
       }
 
@@ -340,8 +343,10 @@ export default function Admin() {
 
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const detail = j.code ? `${j.error || "Save failed"} (${j.code})` : (j.error || j.detail || "Failed to save article.");
-        setMsg({ kind: "err", text: detail });
+        const base = j.error || "Failed to save article.";
+        const codePart = j.code ? ` (${j.code})` : "";
+        const detailPart = j.detail ? ` ${j.detail}` : "";
+        setMsg({ kind: "err", text: `${base}${codePart}${detailPart}` });
         return;
       }
 
@@ -365,8 +370,10 @@ export default function Admin() {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const detail = j.code ? `${j.error || "Delete failed"} (${j.code})` : (j.error || j.detail || "Failed to delete article.");
-        setMsg({ kind: "err", text: detail });
+        const base = j.error || "Failed to delete article.";
+        const codePart = j.code ? ` (${j.code})` : "";
+        const detailPart = j.detail ? ` ${j.detail}` : "";
+        setMsg({ kind: "err", text: `${base}${codePart}${detailPart}` });
         return;
       }
 

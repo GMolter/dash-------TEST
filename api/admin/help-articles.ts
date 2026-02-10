@@ -97,6 +97,25 @@ export default async function handler(req: any, res: any) {
       return res.status(503).json({ error: "Help articles backend not configured." });
     }
 
+    try {
+      // Fail early with a clear message if env URL is malformed.
+      new URL(url);
+    } catch (urlErr: any) {
+      const detail = String(urlErr?.message || urlErr);
+      if (isGet) {
+        return res.status(200).json({
+          articles: [],
+          warning: "SUPABASE_URL is invalid.",
+          detail,
+        });
+      }
+      return res.status(503).json({
+        error: "SUPABASE_URL is invalid.",
+        detail,
+        code: "INVALID_SUPABASE_URL",
+      });
+    }
+
     const supabase = createClient(url, service);
 
     const hasSession = await hasValidAdminPasswordSession(req);
