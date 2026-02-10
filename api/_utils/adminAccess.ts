@@ -21,7 +21,11 @@ async function resolveAppAdmin(req: any): Promise<AccessResult> {
 
   const accessToken = readBearerToken(req);
   if (!accessToken) {
-    return { ok: false, status: 401, error: "Missing bearer token" };
+    return {
+      ok: false,
+      status: 401,
+      error: "You must be signed into the app before using App Admin.",
+    };
   }
 
   const supabase = createClient(url, service);
@@ -36,8 +40,23 @@ async function resolveAppAdmin(req: any): Promise<AccessResult> {
     .eq("id", userData.user.id)
     .maybeSingle();
 
-  if (profileError) return { ok: false, status: 500, error: profileError.message };
-  if (!profile?.app_admin) return { ok: false, status: 403, error: "App admin access required" };
+  if (profileError) {
+    if (profileError.code === "42703") {
+      return {
+        ok: false,
+        status: 500,
+        error: "Database migration missing: run migration that adds profiles.app_admin.",
+      };
+    }
+    return { ok: false, status: 500, error: profileError.message };
+  }
+  if (!profile?.app_admin) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Your account is not marked as an app admin (profiles.app_admin must be true).",
+    };
+  }
 
   return { ok: true, userId: userData.user.id, email: profile.email || null };
 }
