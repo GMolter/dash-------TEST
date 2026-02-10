@@ -6,6 +6,7 @@ interface Profile {
   id: string;
   org_id: string | null;
   role: 'member' | 'admin' | 'owner';
+  app_admin: boolean | null;
   display_name: string | null;
   email: string | null;
   created_at: string;

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabase";
 import {
   LayoutDashboard,
   Shield,
@@ -11,6 +12,7 @@ import {
   BookOpenText,
   Plus,
   Trash2,
+  CircleHelp,
 } from "lucide-react";
 
 type BannerState = {
@@ -79,8 +81,20 @@ export default function Admin() {
     [articles, selectedArticleId]
   );
 
+  async function adminFetch(url: string, init?: RequestInit) {
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+    const headers = new Headers(init?.headers || {});
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(url, {
+      ...init,
+      headers,
+      credentials: "include",
+    });
+  }
+
   async function refreshAuth() {
-    const r = await fetch("/api/admin/me", { credentials: "include" });
+    const r = await adminFetch("/api/admin/me");
     const text = await r.text();
     try {
       const j = JSON.parse(text);
@@ -107,8 +121,9 @@ export default function Admin() {
   async function loadArticles(preferredId?: string) {
     setLoadingArticles(true);
     try {
-      const r = await fetch("/api/admin/help-articles", { credentials: "include" });
+      const r = await adminFetch("/api/admin/help-articles");
       const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "Failed to load help articles");
       const list = Array.isArray(j.articles) ? (j.articles as HelpArticle[]) : [];
       setArticles(list);
 
@@ -165,10 +180,9 @@ export default function Admin() {
     e.preventDefault();
     setLoginErr(null);
 
-    const r = await fetch("/api/admin/login", {
+    const r = await adminFetch("/api/admin/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include",
       body: JSON.stringify({ password }),
     });
 
@@ -183,7 +197,7 @@ export default function Admin() {
   }
 
   async function logout() {
-    await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
+    await adminFetch("/api/admin/logout", { method: "POST" });
     await refreshAuth();
   }
 
@@ -196,10 +210,9 @@ export default function Admin() {
     setBannerSaving(true);
     setMsg(null);
     try {
-      const r = await fetch("/api/admin/settings", {
+      const r = await adminFetch("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({ bannerEnabled: banner.enabled, bannerText: banner.text }),
       });
       const j = await r.json().catch(() => ({}));
@@ -227,10 +240,9 @@ export default function Admin() {
     setArticleCreating(true);
     setMsg(null);
     try {
-      const r = await fetch("/api/admin/help-articles", {
+      const r = await adminFetch("/api/admin/help-articles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           title,
           slug: articleSlug,
@@ -271,10 +283,9 @@ export default function Admin() {
     setArticleSaving(true);
     setMsg(null);
     try {
-      const r = await fetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
+      const r = await adminFetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           title,
           slug: articleSlug,
@@ -306,9 +317,8 @@ export default function Admin() {
     setArticleDeleting(true);
     setMsg(null);
     try {
-      const r = await fetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
+      const r = await adminFetch(`/api/admin/help-article?id=${encodeURIComponent(selectedArticleId)}`, {
         method: "DELETE",
-        credentials: "include",
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -639,7 +649,17 @@ export default function Admin() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm text-slate-300">Sort Order</label>
+                      <label className="block text-sm text-slate-300">
+                        <span className="inline-flex items-center gap-1">
+                          Sort Order
+                          <span
+                            title="Lower numbers appear first in /help. If equal, newer updates appear first."
+                            className="inline-flex items-center text-slate-400 cursor-help"
+                          >
+                            <CircleHelp className="w-4 h-4" />
+                          </span>
+                        </span>
+                      </label>
                       <input
                         type="number"
                         value={articleSortOrder}

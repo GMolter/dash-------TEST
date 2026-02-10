@@ -1,7 +1,7 @@
 export const config = { runtime: "nodejs" };
 
 import { createClient } from "@supabase/supabase-js";
-import { isAuthed } from "../_utils/session";
+import { requireAdminAccess } from "../_utils/adminAccess";
 
 function toSlug(input: string) {
   return input
@@ -14,9 +14,8 @@ function toSlug(input: string) {
 
 export default async function handler(req: any, res: any) {
   try {
-    const cookieSecret = process.env.ADMIN_COOKIE_SECRET;
-    if (!cookieSecret) return res.status(500).json({ error: "Missing ADMIN_COOKIE_SECRET" });
-    if (!isAuthed(req, cookieSecret)) return res.status(401).json({ error: "Unauthorized" });
+    const access = await requireAdminAccess(req, { requirePasswordSession: true });
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
 
     const url = process.env.SUPABASE_URL;
     const service = process.env.SUPABASE_SERVICE_ROLE_KEY;

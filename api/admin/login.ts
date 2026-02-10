@@ -1,4 +1,5 @@
 export const config = { runtime: "nodejs" };
+import { requireAdminAccess } from "../_utils/adminAccess";
 
 function b64urlFromBase64(b64: string) {
   return b64.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
@@ -7,6 +8,8 @@ function b64urlFromBase64(b64: string) {
 export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+    const access = await requireAdminAccess(req, { requirePasswordSession: false });
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
 
     const adminPassword = process.env.ADMIN_PASSWORD;
     const cookieSecret = process.env.ADMIN_COOKIE_SECRET;
