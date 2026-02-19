@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useOrg } from '../hooks/useOrg';
 import { usePermission } from '../hooks/usePermission';
@@ -45,16 +46,26 @@ export function ProfileSettings({
     APP_BACKGROUND_PRESET_OPTIONS[0];
   const previewThemeOption =
     APP_BACKGROUND_THEME_OPTIONS.find((theme) => theme.id === previewTheme) ?? APP_BACKGROUND_THEME_OPTIONS[0];
+  const isPreviewThemeUnderDevelopment = previewThemeOption.status === 'under-development';
 
   useEffect(() => {
     if (!showThemeModal) return;
+
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setShowThemeModal(false);
     };
 
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+    };
   }, [showThemeModal]);
 
   const handleLeave = async () => {
@@ -250,18 +261,19 @@ export function ProfileSettings({
         </div>
       )}
 
-      {showThemeModal && (
+      {showThemeModal && createPortal(
         <div
-          className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6"
+          className="fixed inset-0 z-[120] bg-slate-950/60 backdrop-blur-md overflow-y-auto"
           onClick={() => setShowThemeModal(false)}
           role="dialog"
           aria-modal="true"
           aria-labelledby="customize-background-title"
         >
-          <div
-            className="bg-slate-900 rounded-2xl border border-slate-700 max-w-6xl w-full p-4 sm:p-6 space-y-6"
-            onClick={(event) => event.stopPropagation()}
-          >
+          <div className="min-h-full p-4 sm:p-6 flex items-center justify-center">
+            <div
+              className="bg-slate-900 rounded-2xl border border-slate-700 max-w-6xl w-full p-4 sm:p-6 space-y-6 max-h-[calc(100vh-2rem)] sm:max-h-[calc(100vh-3rem)] overflow-y-auto"
+              onClick={(event) => event.stopPropagation()}
+            >
             <div className="flex items-center justify-between gap-3">
               <h3 id="customize-background-title" className="text-xl sm:text-2xl font-semibold text-white">
                 Customize App Background
@@ -278,20 +290,36 @@ export function ProfileSettings({
             <div className="grid grid-cols-1 lg:grid-cols-[1.2fr,1fr] gap-6 min-h-[360px]">
               <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
                 <div className="relative h-full min-h-[320px] rounded-lg border border-slate-600/70 overflow-hidden">
-                  <AnimatedBackground
-                    theme={previewTheme}
-                    preset={previewPreset}
-                    fixed={false}
-                    className="absolute inset-0"
-                  />
-                  <div className="relative h-full w-full bg-[linear-gradient(120deg,rgba(15,23,42,0.16),rgba(255,255,255,0.01))] rounded-lg p-6 flex flex-col justify-between pointer-events-none">
-                    <div className="h-9 w-44 rounded-lg border border-white/10 bg-black/20" />
-                    <div className="space-y-3">
-                      <div className="h-5 w-40 rounded bg-white/10" />
-                      <div className="h-4 w-56 rounded bg-white/10" />
-                      <div className="h-4 w-48 rounded bg-white/10" />
+                  {isPreviewThemeUnderDevelopment ? (
+                    <div className="h-full w-full bg-slate-950/80 flex items-center justify-center text-sm text-slate-400 uppercase tracking-wide">
+                      Preview Coming Soon
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      <AnimatedBackground
+                        theme={previewTheme}
+                        preset={previewPreset}
+                        fixed={false}
+                        className="absolute inset-0"
+                      />
+                      <div className="relative h-full w-full bg-[linear-gradient(120deg,rgba(15,23,42,0.16),rgba(255,255,255,0.01))] rounded-lg p-6 flex flex-col justify-between pointer-events-none">
+                        <div className="h-9 w-44 rounded-lg border border-white/10 bg-black/20" />
+                        <div className="space-y-3">
+                          <div className="h-5 w-40 rounded bg-white/10" />
+                          <div className="h-4 w-56 rounded bg-white/10" />
+                          <div className="h-4 w-48 rounded bg-white/10" />
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {isPreviewThemeUnderDevelopment && (
+                    <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(15,23,42,0.28),rgba(15,23,42,0.18))] pointer-events-none" />
+                  )}
+                  {isPreviewThemeUnderDevelopment && (
+                    <div className="absolute bottom-4 left-4 text-xs text-amber-300 uppercase tracking-wide pointer-events-none">
+                      Under development
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -337,14 +365,20 @@ export function ProfileSettings({
                       onAppBackgroundThemeChange(previewTheme);
                       onAppBackgroundPresetChange(previewPreset);
                     }}
-                    disabled={previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset}
+                    disabled={isPreviewThemeUnderDevelopment || (previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset)}
                     className={`w-full py-3 rounded-lg text-sm font-semibold transition-colors ${
-                      previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset
+                      isPreviewThemeUnderDevelopment
+                        ? 'bg-slate-700 text-slate-300 cursor-not-allowed'
+                        : previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset
                         ? 'bg-emerald-600/40 border border-emerald-500/50 text-emerald-200 cursor-default'
                         : 'bg-blue-600 hover:bg-blue-700 text-white'
                     }`}
                   >
-                    {previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset ? 'Selected' : 'Select'}
+                    {isPreviewThemeUnderDevelopment
+                      ? 'Coming Soon'
+                      : previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset
+                      ? 'Selected'
+                      : 'Select'}
                   </button>
                 </div>
               </div>
@@ -365,14 +399,22 @@ export function ProfileSettings({
                         : 'border-slate-700 hover:border-slate-500'
                     }`}
                   >
-                    <div className="relative h-28">
-                      <AnimatedBackground
-                        theme={theme.id}
-                        preset={previewPreset}
-                        fixed={false}
-                        className="absolute inset-0"
-                      />
-                      <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(15,23,42,0.18),rgba(255,255,255,0))]" />
+                    <div className="relative h-28 overflow-hidden">
+                      {theme.status === 'under-development' ? (
+                        <div className="h-full w-full bg-slate-950/80 flex items-center justify-center text-xs text-slate-400 uppercase tracking-wide">
+                          Preview Coming Soon
+                        </div>
+                      ) : (
+                        <>
+                          <AnimatedBackground
+                            theme={theme.id}
+                            preset={previewPreset}
+                            fixed={false}
+                            className="absolute inset-0"
+                          />
+                          <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(15,23,42,0.18),rgba(255,255,255,0))]" />
+                        </>
+                      )}
                     </div>
                     <div className="p-4 bg-slate-900/90">
                       <div className="flex items-center justify-between gap-2">
@@ -391,6 +433,8 @@ export function ProfileSettings({
             </div>
           </div>
         </div>
+        </div>,
+        document.body
       )}
 
       {showDeleteModal && (
