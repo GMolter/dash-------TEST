@@ -31,7 +31,7 @@ type PresetConfig = {
   contourGlowColor: string;
 };
 
-const WAVE_THEME_CONFIGS: Record<Exclude<AppBackgroundTheme, 'contour-drift'>, WaveThemeConfig> = {
+const WAVE_THEME_CONFIGS: Record<AppBackgroundTheme, WaveThemeConfig> = {
   'dynamic-waves': {
     noiseAlpha: 0.12,
     vignetteAlpha: 0.55,
@@ -47,7 +47,7 @@ const WAVE_THEME_CONFIGS: Record<Exclude<AppBackgroundTheme, 'contour-drift'>, W
     waveYOffsetBase: 0.3,
     waveYOffsetStep: 62,
   },
-  'aurora-lattice': {
+  'contour-drift': {
     noiseAlpha: 0.11,
     vignetteAlpha: 0.5,
     waveCount: 5,
@@ -83,9 +83,9 @@ const PRESET_CONFIGS: Record<AppBackgroundPreset, PresetConfig> = {
     dotColor: '190,205,255',
     waveHueBase: 228,
     waveHueStep: 10,
-    contourLinePair: ['#4fa8ff', '#3d6fff'],
-    contourFillColor: '#07101f',
-    contourGlowColor: 'rgba(15,40,100,0.10)',
+    contourLinePair: ['#8b5cf6', '#3b82f6'],
+    contourFillColor: '#080f24',
+    contourGlowColor: 'rgba(66,89,197,0.16)',
   },
   ocean: {
     bodyBackground: '#06101b',
@@ -105,9 +105,9 @@ const PRESET_CONFIGS: Record<AppBackgroundPreset, PresetConfig> = {
     dotColor: '186,230,253',
     waveHueBase: 202,
     waveHueStep: 8,
-    contourLinePair: ['#00c8e0', '#3d6fff'],
-    contourFillColor: '#07101f',
-    contourGlowColor: 'rgba(15,40,100,0.12)',
+    contourLinePair: ['#06b6d4', '#14b8a6'],
+    contourFillColor: '#041824',
+    contourGlowColor: 'rgba(15,120,150,0.14)',
   },
   teal: {
     bodyBackground: '#041114',

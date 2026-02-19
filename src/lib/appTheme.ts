@@ -1,12 +1,12 @@
-export type AppBackgroundTheme = 'dynamic-waves' | 'contour-drift' | 'aurora-lattice';
+export type AppBackgroundTheme = 'dynamic-waves' | 'contour-drift';
 export type AppBackgroundPreset = 'indigo' | 'ocean' | 'teal' | 'sunset';
 
 export const APP_BACKGROUND_THEME_STORAGE_KEY = 'appBackgroundTheme';
 export const APP_BACKGROUND_THEME_CHANGE_EVENT = 'app-background-theme-change';
 export const DEFAULT_APP_BACKGROUND_THEME: AppBackgroundTheme = 'dynamic-waves';
 export const APP_BACKGROUND_PRESET_STORAGE_KEY = 'appBackgroundPreset';
-export const APP_BACKGROUND_PRESET_CHANGE_EVENT = 'app-background-preset-change';
-export const DEFAULT_APP_BACKGROUND_PRESET: AppBackgroundPreset = 'indigo';
+export const APP_BACKGROUND_THEME_PRESETS_STORAGE_KEY = 'appBackgroundThemePresets';
+export const APP_BACKGROUND_THEME_PRESETS_CHANGE_EVENT = 'app-background-theme-presets-change';
 
 export type AppBackgroundThemeOption = {
   id: AppBackgroundTheme;
@@ -21,11 +21,13 @@ export type AppBackgroundPresetOption = {
   swatchClassName: string;
 };
 
+export type AppBackgroundThemePresetMap = Record<AppBackgroundTheme, AppBackgroundPreset>;
+
 export const APP_BACKGROUND_THEME_OPTIONS: AppBackgroundThemeOption[] = [
   {
     id: 'dynamic-waves',
     name: 'Dynamic Waves',
-    subtitle: 'Current app theme',
+    subtitle: 'Default App Theme',
     status: 'stable',
   },
   {
@@ -34,13 +36,12 @@ export const APP_BACKGROUND_THEME_OPTIONS: AppBackgroundThemeOption[] = [
     subtitle: 'Topographic flow field',
     status: 'stable',
   },
-  {
-    id: 'aurora-lattice',
-    name: 'Aurora Lattice',
-    subtitle: 'Under development',
-    status: 'under-development',
-  },
 ];
+
+export const DEFAULT_APP_BACKGROUND_THEME_PRESETS: AppBackgroundThemePresetMap = {
+  'dynamic-waves': 'indigo',
+  'contour-drift': 'ocean',
+};
 
 export const APP_BACKGROUND_PRESET_OPTIONS: AppBackgroundPresetOption[] = [
   {
@@ -77,6 +78,20 @@ export function isAppBackgroundPreset(value: string): value is AppBackgroundPres
   return APP_BACKGROUND_PRESET_OPTIONS.some((preset) => preset.id === value);
 }
 
+export function normalizeAppBackgroundThemePresets(input: unknown): AppBackgroundThemePresetMap {
+  const map: AppBackgroundThemePresetMap = { ...DEFAULT_APP_BACKGROUND_THEME_PRESETS };
+  if (!input || typeof input !== 'object') return map;
+
+  for (const themeOption of APP_BACKGROUND_THEME_OPTIONS) {
+    const raw = (input as Record<string, unknown>)[themeOption.id];
+    if (typeof raw === 'string' && isAppBackgroundPreset(raw)) {
+      map[themeOption.id] = raw;
+    }
+  }
+
+  return map;
+}
+
 export function getStoredAppBackgroundTheme(): AppBackgroundTheme {
   try {
     const value = localStorage.getItem(APP_BACKGROUND_THEME_STORAGE_KEY);
@@ -85,12 +100,23 @@ export function getStoredAppBackgroundTheme(): AppBackgroundTheme {
   return DEFAULT_APP_BACKGROUND_THEME;
 }
 
-export function getStoredAppBackgroundPreset(): AppBackgroundPreset {
+export function getStoredAppBackgroundThemePresets(): AppBackgroundThemePresetMap {
   try {
-    const value = localStorage.getItem(APP_BACKGROUND_PRESET_STORAGE_KEY);
-    if (value && isAppBackgroundPreset(value)) return value;
+    const json = localStorage.getItem(APP_BACKGROUND_THEME_PRESETS_STORAGE_KEY);
+    if (json) {
+      const parsed = JSON.parse(json) as unknown;
+      return normalizeAppBackgroundThemePresets(parsed);
+    }
+
+    const legacyPreset = localStorage.getItem(APP_BACKGROUND_PRESET_STORAGE_KEY);
+    if (legacyPreset && isAppBackgroundPreset(legacyPreset)) {
+      return {
+        ...DEFAULT_APP_BACKGROUND_THEME_PRESETS,
+        'dynamic-waves': legacyPreset,
+      };
+    }
   } catch {}
-  return DEFAULT_APP_BACKGROUND_PRESET;
+  return { ...DEFAULT_APP_BACKGROUND_THEME_PRESETS };
 }
 
 export function setStoredAppBackgroundTheme(theme: AppBackgroundTheme) {
@@ -100,9 +126,14 @@ export function setStoredAppBackgroundTheme(theme: AppBackgroundTheme) {
   window.dispatchEvent(new CustomEvent<AppBackgroundTheme>(APP_BACKGROUND_THEME_CHANGE_EVENT, { detail: theme }));
 }
 
-export function setStoredAppBackgroundPreset(preset: AppBackgroundPreset) {
+export function setStoredAppBackgroundThemePreset(theme: AppBackgroundTheme, preset: AppBackgroundPreset) {
+  const next = {
+    ...getStoredAppBackgroundThemePresets(),
+    [theme]: preset,
+  };
+
   try {
-    localStorage.setItem(APP_BACKGROUND_PRESET_STORAGE_KEY, preset);
+    localStorage.setItem(APP_BACKGROUND_THEME_PRESETS_STORAGE_KEY, JSON.stringify(next));
   } catch {}
-  window.dispatchEvent(new CustomEvent<AppBackgroundPreset>(APP_BACKGROUND_PRESET_CHANGE_EVENT, { detail: preset }));
+  window.dispatchEvent(new CustomEvent<AppBackgroundThemePresetMap>(APP_BACKGROUND_THEME_PRESETS_CHANGE_EVENT, { detail: next }));
 }

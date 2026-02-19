@@ -23,17 +23,17 @@ import { HelpArticlePage } from './pages/HelpArticlePage';
 import { useAuth } from './hooks/useAuth';
 import { useOrg } from './hooks/useOrg';
 import {
-  APP_BACKGROUND_PRESET_CHANGE_EVENT,
-  APP_BACKGROUND_PRESET_STORAGE_KEY,
+  APP_BACKGROUND_THEME_PRESETS_CHANGE_EVENT,
+  APP_BACKGROUND_THEME_PRESETS_STORAGE_KEY,
   APP_BACKGROUND_THEME_STORAGE_KEY,
   APP_BACKGROUND_THEME_CHANGE_EVENT,
-  AppBackgroundPreset,
+  AppBackgroundThemePresetMap,
   AppBackgroundTheme,
-  getStoredAppBackgroundPreset,
+  getStoredAppBackgroundThemePresets,
   getStoredAppBackgroundTheme,
-  isAppBackgroundPreset,
   isAppBackgroundTheme,
-  setStoredAppBackgroundPreset,
+  normalizeAppBackgroundThemePresets,
+  setStoredAppBackgroundThemePreset,
   setStoredAppBackgroundTheme,
 } from './lib/appTheme';
 import { Home, Wrench, Menu, X, AlertTriangle, Building2, UserCircle } from 'lucide-react';
@@ -77,7 +77,8 @@ function App() {
   const [banner, setBanner] = useState<BannerState>({ enabled: false, text: '' });
   const [allowOnboarding, setAllowOnboarding] = useState(false);
   const [appBackgroundTheme, setAppBackgroundTheme] = useState<AppBackgroundTheme>(() => getStoredAppBackgroundTheme());
-  const [appBackgroundPreset, setAppBackgroundPreset] = useState<AppBackgroundPreset>(() => getStoredAppBackgroundPreset());
+  const [appBackgroundThemePresets, setAppBackgroundThemePresets] = useState<AppBackgroundThemePresetMap>(() => getStoredAppBackgroundThemePresets());
+  const appBackgroundPreset = appBackgroundThemePresets[appBackgroundTheme];
 
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -108,11 +109,9 @@ function App() {
       }
     };
 
-    const onPresetChange = (event: Event) => {
-      const customEvent = event as CustomEvent<AppBackgroundPreset>;
-      if (isAppBackgroundPreset(customEvent.detail)) {
-        setAppBackgroundPreset(customEvent.detail);
-      }
+    const onThemePresetsChange = (event: Event) => {
+      const customEvent = event as CustomEvent<AppBackgroundThemePresetMap>;
+      setAppBackgroundThemePresets(normalizeAppBackgroundThemePresets(customEvent.detail));
     };
 
     const onStorage = (event: StorageEvent) => {
@@ -126,23 +125,19 @@ function App() {
         setAppBackgroundTheme(getStoredAppBackgroundTheme());
       }
 
-      if (event.key === APP_BACKGROUND_PRESET_STORAGE_KEY) {
-        if (event.newValue && isAppBackgroundPreset(event.newValue)) {
-          setAppBackgroundPreset(event.newValue);
-          return;
-        }
-        setAppBackgroundPreset(getStoredAppBackgroundPreset());
+      if (event.key === APP_BACKGROUND_THEME_PRESETS_STORAGE_KEY) {
+        setAppBackgroundThemePresets(getStoredAppBackgroundThemePresets());
         return;
       }
     };
 
     window.addEventListener(APP_BACKGROUND_THEME_CHANGE_EVENT, onThemeChange as EventListener);
-    window.addEventListener(APP_BACKGROUND_PRESET_CHANGE_EVENT, onPresetChange as EventListener);
+    window.addEventListener(APP_BACKGROUND_THEME_PRESETS_CHANGE_EVENT, onThemePresetsChange as EventListener);
     window.addEventListener('storage', onStorage);
 
     return () => {
       window.removeEventListener(APP_BACKGROUND_THEME_CHANGE_EVENT, onThemeChange as EventListener);
-      window.removeEventListener(APP_BACKGROUND_PRESET_CHANGE_EVENT, onPresetChange as EventListener);
+      window.removeEventListener(APP_BACKGROUND_THEME_PRESETS_CHANGE_EVENT, onThemePresetsChange as EventListener);
       window.removeEventListener('storage', onStorage);
     };
   }, []);
@@ -492,13 +487,14 @@ function App() {
               <ProfileSettings
                 appBackgroundTheme={appBackgroundTheme}
                 appBackgroundPreset={appBackgroundPreset}
+                getPresetForTheme={(theme) => appBackgroundThemePresets[theme]}
                 onAppBackgroundThemeChange={(theme) => {
                   setAppBackgroundTheme(theme);
                   setStoredAppBackgroundTheme(theme);
                 }}
-                onAppBackgroundPresetChange={(preset) => {
-                  setAppBackgroundPreset(preset);
-                  setStoredAppBackgroundPreset(preset);
+                onAppBackgroundPresetChange={(theme, preset) => {
+                  setAppBackgroundThemePresets((prev) => ({ ...prev, [theme]: preset }));
+                  setStoredAppBackgroundThemePreset(theme, preset);
                 }}
               />
             )}

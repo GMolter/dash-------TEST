@@ -15,13 +15,15 @@ import { AnimatedBackground } from '../components/AnimatedBackground';
 type ProfileSettingsProps = {
   appBackgroundTheme: AppBackgroundTheme;
   appBackgroundPreset: AppBackgroundPreset;
+  getPresetForTheme: (theme: AppBackgroundTheme) => AppBackgroundPreset;
   onAppBackgroundThemeChange: (theme: AppBackgroundTheme) => void;
-  onAppBackgroundPresetChange: (preset: AppBackgroundPreset) => void;
+  onAppBackgroundPresetChange: (theme: AppBackgroundTheme, preset: AppBackgroundPreset) => void;
 };
 
 export function ProfileSettings({
   appBackgroundTheme,
   appBackgroundPreset,
+  getPresetForTheme,
   onAppBackgroundThemeChange,
   onAppBackgroundPresetChange,
 }: ProfileSettingsProps) {
@@ -135,7 +137,7 @@ export function ProfileSettings({
             <button
               onClick={() => {
                 setPreviewTheme(appBackgroundTheme);
-                setPreviewPreset(appBackgroundPreset);
+                setPreviewPreset(getPresetForTheme(appBackgroundTheme));
                 setShowThemeModal(true);
               }}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm font-medium transition-colors"
@@ -363,7 +365,7 @@ export function ProfileSettings({
                   <button
                     onClick={() => {
                       onAppBackgroundThemeChange(previewTheme);
-                      onAppBackgroundPresetChange(previewPreset);
+                      onAppBackgroundPresetChange(previewTheme, previewPreset);
                     }}
                     disabled={isPreviewThemeUnderDevelopment || (previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset)}
                     className={`w-full py-3 rounded-lg text-sm font-semibold transition-colors ${
@@ -392,7 +394,10 @@ export function ProfileSettings({
                 return (
                   <button
                     key={theme.id}
-                    onClick={() => setPreviewTheme(theme.id)}
+                    onClick={() => {
+                      setPreviewTheme(theme.id);
+                      setPreviewPreset(getPresetForTheme(theme.id));
+                    }}
                     className={`group rounded-xl border text-left transition-all overflow-hidden ${
                       isPreview
                         ? 'border-blue-400 shadow-lg shadow-blue-950/40 scale-[1.02]'
@@ -408,7 +413,7 @@ export function ProfileSettings({
                         <>
                           <AnimatedBackground
                             theme={theme.id}
-                            preset={previewPreset}
+                            preset={theme.id === previewTheme ? previewPreset : getPresetForTheme(theme.id)}
                             fixed={false}
                             className="absolute inset-0"
                           />
