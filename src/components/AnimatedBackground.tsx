@@ -1,14 +1,111 @@
 import { useEffect, useRef } from 'react';
+import { AppBackgroundTheme } from '../lib/appTheme';
 
 // Canvas background adapted from the HTML you provided.
 // - Fixed, full-screen canvas
 // - Subtle gradient + drifting dots + grid + waves + grain + vignette
 // - DPR capped for performance
-export function AnimatedBackground() {
+type ThemeConfig = {
+  bodyBackground: string;
+  baseGradientStops: [number, string][];
+  spotGradientStops: [number, string][];
+  gridMinorColor: string;
+  gridMajorColor: string;
+  dotColor: string;
+  noiseAlpha: number;
+  vignetteAlpha: number;
+  waveCount: number;
+  waveAmpBase: number;
+  waveAmpStep: number;
+  waveFreqBase: number;
+  waveFreqStep: number;
+  waveSpeedBase: number;
+  waveSpeedStep: number;
+  waveOpacityBase: number;
+  waveOpacityStep: number;
+  waveHueBase: number;
+  waveHueStep: number;
+  waveYOffsetBase: number;
+  waveYOffsetStep: number;
+};
+
+const THEME_CONFIGS: Record<AppBackgroundTheme, ThemeConfig> = {
+  'dynamic-waves': {
+    bodyBackground: '#05050a',
+    baseGradientStops: [
+      [0, '#05050a'],
+      [0.35, '#070814'],
+      [0.7, '#060610'],
+      [1, '#04040a'],
+    ],
+    spotGradientStops: [
+      [0, 'rgba(120,140,255,0.10)'],
+      [0.35, 'rgba(90,120,255,0.05)'],
+      [1, 'rgba(0,0,0,0)'],
+    ],
+    gridMinorColor: 'rgba(120,140,255,0.35)',
+    gridMajorColor: 'rgba(255,255,255,0.35)',
+    dotColor: '190,205,255',
+    noiseAlpha: 0.12,
+    vignetteAlpha: 0.55,
+    waveCount: 6,
+    waveAmpBase: 70,
+    waveAmpStep: 18,
+    waveFreqBase: 0.0028,
+    waveFreqStep: 0.00018,
+    waveSpeedBase: 0.018,
+    waveSpeedStep: 0.004,
+    waveOpacityBase: 0.13,
+    waveOpacityStep: 0.015,
+    waveHueBase: 228,
+    waveHueStep: 10,
+    waveYOffsetBase: 0.3,
+    waveYOffsetStep: 62,
+  },
+  'aurora-lattice': {
+    bodyBackground: '#041015',
+    baseGradientStops: [
+      [0, '#031018'],
+      [0.4, '#062131'],
+      [0.72, '#05202b'],
+      [1, '#040e14'],
+    ],
+    spotGradientStops: [
+      [0, 'rgba(16,185,129,0.16)'],
+      [0.4, 'rgba(56,189,248,0.08)'],
+      [1, 'rgba(0,0,0,0)'],
+    ],
+    gridMinorColor: 'rgba(45,212,191,0.22)',
+    gridMajorColor: 'rgba(125,211,252,0.22)',
+    dotColor: '167,243,208',
+    noiseAlpha: 0.1,
+    vignetteAlpha: 0.45,
+    waveCount: 5,
+    waveAmpBase: 58,
+    waveAmpStep: 14,
+    waveFreqBase: 0.0022,
+    waveFreqStep: 0.00014,
+    waveSpeedBase: 0.016,
+    waveSpeedStep: 0.003,
+    waveOpacityBase: 0.16,
+    waveOpacityStep: 0.02,
+    waveHueBase: 172,
+    waveHueStep: 8,
+    waveYOffsetBase: 0.34,
+    waveYOffsetStep: 56,
+  },
+};
+
+type AnimatedBackgroundProps = {
+  theme?: AppBackgroundTheme;
+};
+
+export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
+    const config = THEME_CONFIGS[theme];
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -17,7 +114,7 @@ export function AnimatedBackground() {
 
     // Keep base background color, but do not lock body scroll.
     const prevBg = document.body.style.background;
-    document.body.style.background = '#05050a';
+    document.body.style.background = config.bodyBackground;
 
     let w = 0;
     let h = 0;
@@ -98,10 +195,9 @@ export function AnimatedBackground() {
       ctx.clearRect(0, 0, w, h);
 
       const bg = ctx.createLinearGradient(0, 0, w, h);
-      bg.addColorStop(0, '#05050a');
-      bg.addColorStop(0.35, '#070814');
-      bg.addColorStop(0.7, '#060610');
-      bg.addColorStop(1, '#04040a');
+      for (const [stop, color] of config.baseGradientStops) {
+        bg.addColorStop(stop, color);
+      }
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
 
@@ -113,9 +209,9 @@ export function AnimatedBackground() {
         h * 0.15,
         Math.max(w, h) * 0.75
       );
-      spot.addColorStop(0, 'rgba(120,140,255,0.10)');
-      spot.addColorStop(0.35, 'rgba(90,120,255,0.05)');
-      spot.addColorStop(1, 'rgba(0,0,0,0)');
+      for (const [stop, color] of config.spotGradientStops) {
+        spot.addColorStop(stop, color);
+      }
       ctx.fillStyle = spot;
       ctx.fillRect(0, 0, w, h);
     }
@@ -138,7 +234,7 @@ export function AnimatedBackground() {
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
       }
-      ctx.strokeStyle = 'rgba(120,140,255,0.35)';
+      ctx.strokeStyle = config.gridMinorColor;
       ctx.lineWidth = 1;
       ctx.stroke();
 
@@ -153,7 +249,7 @@ export function AnimatedBackground() {
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
       }
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.strokeStyle = config.gridMajorColor;
       ctx.lineWidth = 1;
       ctx.stroke();
 
@@ -176,7 +272,7 @@ export function AnimatedBackground() {
         const twinkle = (Math.sin(p.tw) + 1) * 0.5;
         const a = p.a * (0.55 + twinkle * 0.75);
 
-        ctx.fillStyle = `rgba(190,205,255,${a})`;
+        ctx.fillStyle = `rgba(${config.dotColor},${a})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fill();
@@ -188,7 +284,7 @@ export function AnimatedBackground() {
       if (!noiseCanvas) return;
       ctx.save();
       ctx.globalCompositeOperation = 'overlay';
-      ctx.globalAlpha = 0.12;
+      ctx.globalAlpha = config.noiseAlpha;
       const pattern = ctx.createPattern(noiseCanvas, 'repeat');
       if (pattern) {
         ctx.fillStyle = pattern;
@@ -208,7 +304,7 @@ export function AnimatedBackground() {
         Math.max(w, h) * 0.75
       );
       vg.addColorStop(0, 'rgba(0,0,0,0)');
-      vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+      vg.addColorStop(1, `rgba(0,0,0,${config.vignetteAlpha})`);
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
@@ -225,16 +321,16 @@ export function AnimatedBackground() {
 
       constructor(index: number) {
         this.index = index;
-        this.amp = 70 + index * 18;
-        this.freq = 0.0028 - index * 0.00018;
-        this.speed = 0.018 + index * 0.004;
+        this.amp = config.waveAmpBase + index * config.waveAmpStep;
+        this.freq = config.waveFreqBase - index * config.waveFreqStep;
+        this.speed = config.waveSpeedBase + index * config.waveSpeedStep;
         this.yBase = 0;
-        this.opacity = 0.13 - index * 0.015;
-        this.hue = 228 - index * 10;
+        this.opacity = config.waveOpacityBase - index * config.waveOpacityStep;
+        this.hue = config.waveHueBase - index * config.waveHueStep;
       }
 
       onResize() {
-        this.yBase = h * 0.3 + this.index * 62;
+        this.yBase = h * config.waveYOffsetBase + this.index * config.waveYOffsetStep;
       }
 
       yAt(x: number) {
@@ -295,7 +391,7 @@ export function AnimatedBackground() {
 
     function initWaves() {
       waves.length = 0;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < config.waveCount; i++) {
         const wave = new Wave(i);
         wave.onResize();
         waves.push(wave);
@@ -325,7 +421,7 @@ export function AnimatedBackground() {
       window.removeEventListener('resize', onResize);
       document.body.style.background = prevBg;
     };
-  }, []);
+  }, [theme]);
 
   return (
     <canvas

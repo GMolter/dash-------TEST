@@ -22,6 +22,14 @@ import { HelpPage } from './pages/HelpPage';
 import { HelpArticlePage } from './pages/HelpArticlePage';
 import { useAuth } from './hooks/useAuth';
 import { useOrg } from './hooks/useOrg';
+import {
+  APP_BACKGROUND_THEME_STORAGE_KEY,
+  APP_BACKGROUND_THEME_CHANGE_EVENT,
+  AppBackgroundTheme,
+  getStoredAppBackgroundTheme,
+  isAppBackgroundTheme,
+  setStoredAppBackgroundTheme,
+} from './lib/appTheme';
 import { Home, Wrench, Menu, X, AlertTriangle, Building2, UserCircle } from 'lucide-react';
 
 type View =
@@ -62,6 +70,7 @@ function App() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [banner, setBanner] = useState<BannerState>({ enabled: false, text: '' });
   const [allowOnboarding, setAllowOnboarding] = useState(false);
+  const [appBackgroundTheme, setAppBackgroundTheme] = useState<AppBackgroundTheme>(() => getStoredAppBackgroundTheme());
 
   useEffect(() => {
     const interval = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -83,6 +92,38 @@ function App() {
       localStorage.setItem('sidebarOpen', String(sidebarOpen));
     } catch {}
   }, [sidebarOpen]);
+
+  useEffect(() => {
+    const onThemeChange = (event: Event) => {
+      const customEvent = event as CustomEvent<AppBackgroundTheme>;
+      if (isAppBackgroundTheme(customEvent.detail)) {
+        setAppBackgroundTheme(customEvent.detail);
+      }
+    };
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key) {
+        if (event.key !== APP_BACKGROUND_THEME_STORAGE_KEY) return;
+      } else {
+        return;
+      }
+
+      if (event.newValue && isAppBackgroundTheme(event.newValue)) {
+        setAppBackgroundTheme(event.newValue);
+        return;
+      }
+
+      setAppBackgroundTheme(getStoredAppBackgroundTheme());
+    };
+
+    window.addEventListener(APP_BACKGROUND_THEME_CHANGE_EVENT, onThemeChange as EventListener);
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      window.removeEventListener(APP_BACKGROUND_THEME_CHANGE_EVENT, onThemeChange as EventListener);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -343,7 +384,7 @@ function App() {
 
   return (
     <div className="min-h-screen text-white relative">
-      <AnimatedBackground />
+      <AnimatedBackground theme={appBackgroundTheme} />
       <div className="relative z-10 min-h-screen flex flex-col">
         <header className="relative z-20 border-b border-slate-800/50 bg-slate-950/80 backdrop-blur">
           <div className="px-4 sm:px-6 lg:px-10 py-4 sm:py-6 lg:py-7 flex items-start justify-between">
@@ -425,7 +466,15 @@ function App() {
             {view.type === 'utilities' && renderUtilities()}
             {view.type === 'tool' && renderUtilities()}
             {view.type === 'organization' && <OrganizationPage />}
-            {view.type === 'profile' && <ProfileSettings />}
+            {view.type === 'profile' && (
+              <ProfileSettings
+                appBackgroundTheme={appBackgroundTheme}
+                onAppBackgroundThemeChange={(theme) => {
+                  setAppBackgroundTheme(theme);
+                  setStoredAppBackgroundTheme(theme);
+                }}
+              />
+            )}
             {view.type === 'admin' && <Admin />}
             {view.type === 'tool' && view.tool === 'notfound' && <NotFound />}
           </main>

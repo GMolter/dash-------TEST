@@ -2,9 +2,21 @@ import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useOrg } from '../hooks/useOrg';
 import { usePermission } from '../hooks/usePermission';
-import { User, LogOut, Building2, AlertTriangle, ExternalLink } from 'lucide-react';
+import {
+  APP_BACKGROUND_THEME_OPTIONS,
+  AppBackgroundTheme,
+} from '../lib/appTheme';
+import { User, LogOut, Building2, AlertTriangle, ExternalLink, Palette } from 'lucide-react';
 
-export function ProfileSettings() {
+type ProfileSettingsProps = {
+  appBackgroundTheme: AppBackgroundTheme;
+  onAppBackgroundThemeChange: (theme: AppBackgroundTheme) => void;
+};
+
+export function ProfileSettings({
+  appBackgroundTheme,
+  onAppBackgroundThemeChange,
+}: ProfileSettingsProps) {
   const { user, signOut } = useAuth();
   const { profile, organization, leaveOrg, deleteOrg } = useOrg();
   const { isOwner } = usePermission();
@@ -14,6 +26,15 @@ export function ProfileSettings() {
   const [deleteChecked, setDeleteChecked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showThemeModal, setShowThemeModal] = useState(false);
+  const [previewTheme, setPreviewTheme] = useState<AppBackgroundTheme>(appBackgroundTheme);
+
+  const activeThemeOption =
+    APP_BACKGROUND_THEME_OPTIONS.find((theme) => theme.id === appBackgroundTheme) ??
+    APP_BACKGROUND_THEME_OPTIONS[0];
+
+  const previewThemeOption =
+    APP_BACKGROUND_THEME_OPTIONS.find((theme) => theme.id === previewTheme) ?? APP_BACKGROUND_THEME_OPTIONS[0];
 
   const handleLeave = async () => {
     if (confirmText !== organization?.name) {
@@ -66,6 +87,31 @@ export function ProfileSettings() {
             Help
             <ExternalLink className="w-4 h-4" />
           </a>
+        </div>
+
+        <div className="border-t border-slate-700 pt-6">
+          <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <Palette className="w-5 h-5" />
+            App Background
+          </h3>
+          <div className="bg-slate-900/50 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <div className="text-sm text-slate-400 mb-1">Current Theme</div>
+              <div className="text-white font-medium">{activeThemeOption.name}</div>
+              {activeThemeOption.status === 'under-development' && (
+                <div className="text-xs text-amber-300 mt-1 uppercase tracking-wide">Under development</div>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                setPreviewTheme(appBackgroundTheme);
+                setShowThemeModal(true);
+              }}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm font-medium transition-colors"
+            >
+              Customize
+            </button>
+          </div>
         </div>
 
         <div className="border-t border-slate-700 pt-6">
@@ -179,6 +225,96 @@ export function ProfileSettings() {
               >
                 {loading ? 'Leaving...' : 'Leave'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showThemeModal && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
+          <div className="bg-slate-900 rounded-2xl border border-slate-700 max-w-6xl w-full p-4 sm:p-6 space-y-6">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xl sm:text-2xl font-semibold text-white">Customize App Background</h3>
+              <button
+                onClick={() => setShowThemeModal(false)}
+                className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-[1.2fr,1fr] gap-6 min-h-[360px]">
+              <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
+                <div className={`h-full min-h-[320px] rounded-lg border border-slate-600/70 ${previewThemeOption.previewClassName}`}>
+                  <div className="h-full w-full bg-[linear-gradient(120deg,rgba(15,23,42,0.12),rgba(255,255,255,0))] rounded-lg p-6 flex flex-col justify-between">
+                    <div className="h-9 w-44 rounded-lg border border-white/10 bg-black/20" />
+                    <div className="space-y-3">
+                      <div className="h-5 w-40 rounded bg-white/10" />
+                      <div className="h-4 w-56 rounded bg-white/10" />
+                      <div className="h-4 w-48 rounded bg-white/10" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-5 flex flex-col">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-slate-400 mb-2">Theme</div>
+                  <h4 className="text-2xl font-semibold text-white">{previewThemeOption.name}</h4>
+                  <p className="text-slate-300 mt-3">{previewThemeOption.subtitle}</p>
+                  {previewThemeOption.status === 'under-development' && (
+                    <div className="inline-flex mt-4 px-3 py-1 rounded-full border border-amber-500/40 bg-amber-600/15 text-amber-200 text-xs uppercase tracking-wide">
+                      Under development
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-8">
+                  <button
+                    onClick={() => onAppBackgroundThemeChange(previewTheme)}
+                    disabled={previewTheme === appBackgroundTheme}
+                    className={`w-full py-3 rounded-lg text-sm font-semibold transition-colors ${
+                      previewTheme === appBackgroundTheme
+                        ? 'bg-emerald-600/40 border border-emerald-500/50 text-emerald-200 cursor-default'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
+                  >
+                    {previewTheme === appBackgroundTheme ? 'Selected' : 'Select'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {APP_BACKGROUND_THEME_OPTIONS.map((theme) => {
+                const isPreview = previewTheme === theme.id;
+                const isActive = appBackgroundTheme === theme.id;
+
+                return (
+                  <button
+                    key={theme.id}
+                    onClick={() => setPreviewTheme(theme.id)}
+                    className={`group rounded-xl border text-left transition-all overflow-hidden ${
+                      isPreview
+                        ? 'border-blue-400 shadow-lg shadow-blue-950/40 scale-[1.02]'
+                        : 'border-slate-700 hover:border-slate-500'
+                    }`}
+                  >
+                    <div className={`h-28 ${theme.previewClassName}`} />
+                    <div className="p-4 bg-slate-900/90">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-white">{theme.name}</div>
+                        {isActive && (
+                          <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/50 text-emerald-200">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm text-slate-400 mt-1">{theme.subtitle}</div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
