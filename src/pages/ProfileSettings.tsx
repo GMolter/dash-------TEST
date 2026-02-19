@@ -1,21 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useOrg } from '../hooks/useOrg';
 import { usePermission } from '../hooks/usePermission';
 import {
+  APP_BACKGROUND_PRESET_OPTIONS,
   APP_BACKGROUND_THEME_OPTIONS,
+  AppBackgroundPreset,
   AppBackgroundTheme,
 } from '../lib/appTheme';
-import { User, LogOut, Building2, AlertTriangle, ExternalLink, Palette } from 'lucide-react';
+import { User, LogOut, Building2, AlertTriangle, ExternalLink, Palette, X } from 'lucide-react';
+import { AnimatedBackground } from '../components/AnimatedBackground';
 
 type ProfileSettingsProps = {
   appBackgroundTheme: AppBackgroundTheme;
+  appBackgroundPreset: AppBackgroundPreset;
   onAppBackgroundThemeChange: (theme: AppBackgroundTheme) => void;
+  onAppBackgroundPresetChange: (preset: AppBackgroundPreset) => void;
 };
 
 export function ProfileSettings({
   appBackgroundTheme,
+  appBackgroundPreset,
   onAppBackgroundThemeChange,
+  onAppBackgroundPresetChange,
 }: ProfileSettingsProps) {
   const { user, signOut } = useAuth();
   const { profile, organization, leaveOrg, deleteOrg } = useOrg();
@@ -28,13 +35,27 @@ export function ProfileSettings({
   const [error, setError] = useState('');
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [previewTheme, setPreviewTheme] = useState<AppBackgroundTheme>(appBackgroundTheme);
+  const [previewPreset, setPreviewPreset] = useState<AppBackgroundPreset>(appBackgroundPreset);
 
   const activeThemeOption =
     APP_BACKGROUND_THEME_OPTIONS.find((theme) => theme.id === appBackgroundTheme) ??
     APP_BACKGROUND_THEME_OPTIONS[0];
-
+  const activePresetOption =
+    APP_BACKGROUND_PRESET_OPTIONS.find((preset) => preset.id === appBackgroundPreset) ??
+    APP_BACKGROUND_PRESET_OPTIONS[0];
   const previewThemeOption =
     APP_BACKGROUND_THEME_OPTIONS.find((theme) => theme.id === previewTheme) ?? APP_BACKGROUND_THEME_OPTIONS[0];
+
+  useEffect(() => {
+    if (!showThemeModal) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowThemeModal(false);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showThemeModal]);
 
   const handleLeave = async () => {
     if (confirmText !== organization?.name) {
@@ -98,13 +119,12 @@ export function ProfileSettings({
             <div>
               <div className="text-sm text-slate-400 mb-1">Current Theme</div>
               <div className="text-white font-medium">{activeThemeOption.name}</div>
-              {activeThemeOption.status === 'under-development' && (
-                <div className="text-xs text-amber-300 mt-1 uppercase tracking-wide">Under development</div>
-              )}
+              <div className="text-xs text-slate-400 mt-1">Preset: {activePresetOption.name}</div>
             </div>
             <button
               onClick={() => {
                 setPreviewTheme(appBackgroundTheme);
+                setPreviewPreset(appBackgroundPreset);
                 setShowThemeModal(true);
               }}
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white text-sm font-medium transition-colors"
@@ -231,22 +251,40 @@ export function ProfileSettings({
       )}
 
       {showThemeModal && (
-        <div className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6">
-          <div className="bg-slate-900 rounded-2xl border border-slate-700 max-w-6xl w-full p-4 sm:p-6 space-y-6">
+        <div
+          className="fixed inset-0 bg-black/65 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6"
+          onClick={() => setShowThemeModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="customize-background-title"
+        >
+          <div
+            className="bg-slate-900 rounded-2xl border border-slate-700 max-w-6xl w-full p-4 sm:p-6 space-y-6"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-xl sm:text-2xl font-semibold text-white">Customize App Background</h3>
+              <h3 id="customize-background-title" className="text-xl sm:text-2xl font-semibold text-white">
+                Customize App Background
+              </h3>
               <button
                 onClick={() => setShowThemeModal(false)}
-                className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm"
+                className="h-9 w-9 inline-flex items-center justify-center rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                aria-label="Close customize app background modal"
               >
-                Close
+                <X className="h-5 w-5" />
               </button>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-[1.2fr,1fr] gap-6 min-h-[360px]">
               <div className="rounded-xl border border-slate-700 bg-slate-950/70 p-4">
-                <div className={`h-full min-h-[320px] rounded-lg border border-slate-600/70 ${previewThemeOption.previewClassName}`}>
-                  <div className="h-full w-full bg-[linear-gradient(120deg,rgba(15,23,42,0.12),rgba(255,255,255,0))] rounded-lg p-6 flex flex-col justify-between">
+                <div className="relative h-full min-h-[320px] rounded-lg border border-slate-600/70 overflow-hidden">
+                  <AnimatedBackground
+                    theme={previewTheme}
+                    preset={previewPreset}
+                    fixed={false}
+                    className="absolute inset-0"
+                  />
+                  <div className="relative h-full w-full bg-[linear-gradient(120deg,rgba(15,23,42,0.16),rgba(255,255,255,0.01))] rounded-lg p-6 flex flex-col justify-between pointer-events-none">
                     <div className="h-9 w-44 rounded-lg border border-white/10 bg-black/20" />
                     <div className="space-y-3">
                       <div className="h-5 w-40 rounded bg-white/10" />
@@ -269,17 +307,44 @@ export function ProfileSettings({
                   )}
                 </div>
 
+                <div className="mt-7">
+                  <div className="text-xs uppercase tracking-wide text-slate-400 mb-3">Color Presets</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {APP_BACKGROUND_PRESET_OPTIONS.map((preset) => {
+                      const selected = previewPreset === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          onClick={() => setPreviewPreset(preset.id)}
+                          className={`rounded-lg border p-1 transition-colors ${
+                            selected
+                              ? 'border-blue-400 shadow-md shadow-blue-950/30'
+                              : 'border-slate-700 hover:border-slate-500'
+                          }`}
+                          aria-pressed={selected}
+                        >
+                          <div className={`h-10 rounded ${preset.swatchClassName}`} />
+                          <div className="text-sm text-slate-200 mt-2">{preset.name}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="mt-8">
                   <button
-                    onClick={() => onAppBackgroundThemeChange(previewTheme)}
-                    disabled={previewTheme === appBackgroundTheme}
+                    onClick={() => {
+                      onAppBackgroundThemeChange(previewTheme);
+                      onAppBackgroundPresetChange(previewPreset);
+                    }}
+                    disabled={previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset}
                     className={`w-full py-3 rounded-lg text-sm font-semibold transition-colors ${
-                      previewTheme === appBackgroundTheme
+                      previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset
                         ? 'bg-emerald-600/40 border border-emerald-500/50 text-emerald-200 cursor-default'
                         : 'bg-blue-600 hover:bg-blue-700 text-white'
                     }`}
                   >
-                    {previewTheme === appBackgroundTheme ? 'Selected' : 'Select'}
+                    {previewTheme === appBackgroundTheme && previewPreset === appBackgroundPreset ? 'Selected' : 'Select'}
                   </button>
                 </div>
               </div>
@@ -300,7 +365,15 @@ export function ProfileSettings({
                         : 'border-slate-700 hover:border-slate-500'
                     }`}
                   >
-                    <div className={`h-28 ${theme.previewClassName}`} />
+                    <div className="relative h-28">
+                      <AnimatedBackground
+                        theme={theme.id}
+                        preset={previewPreset}
+                        fixed={false}
+                        className="absolute inset-0"
+                      />
+                      <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(15,23,42,0.18),rgba(255,255,255,0))]" />
+                    </div>
                     <div className="p-4 bg-slate-900/90">
                       <div className="flex items-center justify-between gap-2">
                         <div className="font-medium text-white">{theme.name}</div>

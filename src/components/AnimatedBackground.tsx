@@ -1,17 +1,11 @@
 import { useEffect, useRef } from 'react';
-import { AppBackgroundTheme } from '../lib/appTheme';
+import { AppBackgroundPreset, AppBackgroundTheme } from '../lib/appTheme';
 
 // Canvas background adapted from the HTML you provided.
 // - Fixed, full-screen canvas
 // - Subtle gradient + drifting dots + grid + waves + grain + vignette
 // - DPR capped for performance
 type ThemeConfig = {
-  bodyBackground: string;
-  baseGradientStops: [number, string][];
-  spotGradientStops: [number, string][];
-  gridMinorColor: string;
-  gridMajorColor: string;
-  dotColor: string;
   noiseAlpha: number;
   vignetteAlpha: number;
   waveCount: number;
@@ -29,8 +23,52 @@ type ThemeConfig = {
   waveYOffsetStep: number;
 };
 
+type PresetConfig = {
+  bodyBackground: string;
+  baseGradientStops: [number, string][];
+  spotGradientStops: [number, string][];
+  gridMinorColor: string;
+  gridMajorColor: string;
+  dotColor: string;
+  waveHueBase: number;
+  waveHueStep: number;
+};
+
 const THEME_CONFIGS: Record<AppBackgroundTheme, ThemeConfig> = {
   'dynamic-waves': {
+    noiseAlpha: 0.12,
+    vignetteAlpha: 0.55,
+    waveCount: 6,
+    waveAmpBase: 70,
+    waveAmpStep: 18,
+    waveFreqBase: 0.0028,
+    waveFreqStep: 0.00018,
+    waveSpeedBase: 0.018,
+    waveSpeedStep: 0.004,
+    waveOpacityBase: 0.13,
+    waveOpacityStep: 0.015,
+    waveYOffsetBase: 0.3,
+    waveYOffsetStep: 62,
+  },
+  'aurora-lattice': {
+    noiseAlpha: 0.11,
+    vignetteAlpha: 0.5,
+    waveCount: 5,
+    waveAmpBase: 58,
+    waveAmpStep: 14,
+    waveFreqBase: 0.0022,
+    waveFreqStep: 0.00014,
+    waveSpeedBase: 0.016,
+    waveSpeedStep: 0.003,
+    waveOpacityBase: 0.16,
+    waveOpacityStep: 0.02,
+    waveYOffsetBase: 0.34,
+    waveYOffsetStep: 56,
+  },
+};
+
+const PRESET_CONFIGS: Record<AppBackgroundPreset, PresetConfig> = {
+  indigo: {
     bodyBackground: '#05050a',
     baseGradientStops: [
       [0, '#05050a'],
@@ -46,75 +84,95 @@ const THEME_CONFIGS: Record<AppBackgroundTheme, ThemeConfig> = {
     gridMinorColor: 'rgba(120,140,255,0.35)',
     gridMajorColor: 'rgba(255,255,255,0.35)',
     dotColor: '190,205,255',
-    noiseAlpha: 0.12,
-    vignetteAlpha: 0.55,
-    waveCount: 6,
-    waveAmpBase: 70,
-    waveAmpStep: 18,
-    waveFreqBase: 0.0028,
-    waveFreqStep: 0.00018,
-    waveSpeedBase: 0.018,
-    waveSpeedStep: 0.004,
-    waveOpacityBase: 0.13,
-    waveOpacityStep: 0.015,
     waveHueBase: 228,
     waveHueStep: 10,
-    waveYOffsetBase: 0.3,
-    waveYOffsetStep: 62,
   },
-  'aurora-lattice': {
-    bodyBackground: '#041015',
+  ocean: {
+    bodyBackground: '#06101b',
     baseGradientStops: [
-      [0, '#031018'],
-      [0.4, '#062131'],
-      [0.72, '#05202b'],
-      [1, '#040e14'],
+      [0, '#05101a'],
+      [0.35, '#082134'],
+      [0.7, '#08182d'],
+      [1, '#050a15'],
     ],
     spotGradientStops: [
-      [0, 'rgba(16,185,129,0.16)'],
-      [0.4, 'rgba(56,189,248,0.08)'],
+      [0, 'rgba(56,189,248,0.11)'],
+      [0.35, 'rgba(59,130,246,0.06)'],
       [1, 'rgba(0,0,0,0)'],
     ],
-    gridMinorColor: 'rgba(45,212,191,0.22)',
-    gridMajorColor: 'rgba(125,211,252,0.22)',
-    dotColor: '167,243,208',
-    noiseAlpha: 0.1,
-    vignetteAlpha: 0.45,
-    waveCount: 5,
-    waveAmpBase: 58,
-    waveAmpStep: 14,
-    waveFreqBase: 0.0022,
-    waveFreqStep: 0.00014,
-    waveSpeedBase: 0.016,
-    waveSpeedStep: 0.003,
-    waveOpacityBase: 0.16,
-    waveOpacityStep: 0.02,
-    waveHueBase: 172,
+    gridMinorColor: 'rgba(125,211,252,0.33)',
+    gridMajorColor: 'rgba(191,219,254,0.30)',
+    dotColor: '186,230,253',
+    waveHueBase: 202,
     waveHueStep: 8,
-    waveYOffsetBase: 0.34,
-    waveYOffsetStep: 56,
+  },
+  teal: {
+    bodyBackground: '#041114',
+    baseGradientStops: [
+      [0, '#041014'],
+      [0.35, '#063138'],
+      [0.7, '#08262c'],
+      [1, '#050b11'],
+    ],
+    spotGradientStops: [
+      [0, 'rgba(45,212,191,0.11)'],
+      [0.35, 'rgba(20,184,166,0.06)'],
+      [1, 'rgba(0,0,0,0)'],
+    ],
+    gridMinorColor: 'rgba(94,234,212,0.32)',
+    gridMajorColor: 'rgba(153,246,228,0.26)',
+    dotColor: '153,246,228',
+    waveHueBase: 174,
+    waveHueStep: 8,
+  },
+  sunset: {
+    bodyBackground: '#13080d',
+    baseGradientStops: [
+      [0, '#14070e'],
+      [0.35, '#2a0f23'],
+      [0.7, '#211338'],
+      [1, '#0d0a17'],
+    ],
+    spotGradientStops: [
+      [0, 'rgba(251,113,133,0.12)'],
+      [0.35, 'rgba(244,114,182,0.06)'],
+      [1, 'rgba(0,0,0,0)'],
+    ],
+    gridMinorColor: 'rgba(251,146,60,0.28)',
+    gridMajorColor: 'rgba(244,114,182,0.24)',
+    dotColor: '253,186,116',
+    waveHueBase: 336,
+    waveHueStep: 10,
   },
 };
 
 type AnimatedBackgroundProps = {
   theme?: AppBackgroundTheme;
+  preset?: AppBackgroundPreset;
+  fixed?: boolean;
+  className?: string;
 };
 
-export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgroundProps) {
+export function AnimatedBackground({
+  theme = 'dynamic-waves',
+  preset = 'indigo',
+  fixed = true,
+  className,
+}: AnimatedBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const config = THEME_CONFIGS[theme];
+    const themeConfig = THEME_CONFIGS[theme];
+    const presetConfig = PRESET_CONFIGS[preset];
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
-    // Keep base background color, but do not lock body scroll.
     const prevBg = document.body.style.background;
-    document.body.style.background = config.bodyBackground;
+    if (fixed) document.body.style.background = presetConfig.bodyBackground;
 
     let w = 0;
     let h = 0;
@@ -174,8 +232,14 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
 
     function resize() {
       dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-      w = Math.floor(window.innerWidth);
-      h = Math.floor(window.innerHeight);
+      if (fixed) {
+        w = Math.max(1, Math.floor(window.innerWidth));
+        h = Math.max(1, Math.floor(window.innerHeight));
+      } else {
+        const rect = canvas.getBoundingClientRect();
+        w = Math.max(1, Math.floor(rect.width));
+        h = Math.max(1, Math.floor(rect.height));
+      }
 
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
@@ -195,7 +259,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
       ctx.clearRect(0, 0, w, h);
 
       const bg = ctx.createLinearGradient(0, 0, w, h);
-      for (const [stop, color] of config.baseGradientStops) {
+      for (const [stop, color] of presetConfig.baseGradientStops) {
         bg.addColorStop(stop, color);
       }
       ctx.fillStyle = bg;
@@ -209,7 +273,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
         h * 0.15,
         Math.max(w, h) * 0.75
       );
-      for (const [stop, color] of config.spotGradientStops) {
+      for (const [stop, color] of presetConfig.spotGradientStops) {
         spot.addColorStop(stop, color);
       }
       ctx.fillStyle = spot;
@@ -234,7 +298,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
       }
-      ctx.strokeStyle = config.gridMinorColor;
+      ctx.strokeStyle = presetConfig.gridMinorColor;
       ctx.lineWidth = 1;
       ctx.stroke();
 
@@ -249,7 +313,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
         ctx.moveTo(0, y);
         ctx.lineTo(w, y);
       }
-      ctx.strokeStyle = config.gridMajorColor;
+      ctx.strokeStyle = presetConfig.gridMajorColor;
       ctx.lineWidth = 1;
       ctx.stroke();
 
@@ -272,7 +336,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
         const twinkle = (Math.sin(p.tw) + 1) * 0.5;
         const a = p.a * (0.55 + twinkle * 0.75);
 
-        ctx.fillStyle = `rgba(${config.dotColor},${a})`;
+        ctx.fillStyle = `rgba(${presetConfig.dotColor},${a})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fill();
@@ -284,7 +348,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
       if (!noiseCanvas) return;
       ctx.save();
       ctx.globalCompositeOperation = 'overlay';
-      ctx.globalAlpha = config.noiseAlpha;
+      ctx.globalAlpha = themeConfig.noiseAlpha;
       const pattern = ctx.createPattern(noiseCanvas, 'repeat');
       if (pattern) {
         ctx.fillStyle = pattern;
@@ -304,7 +368,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
         Math.max(w, h) * 0.75
       );
       vg.addColorStop(0, 'rgba(0,0,0,0)');
-      vg.addColorStop(1, `rgba(0,0,0,${config.vignetteAlpha})`);
+      vg.addColorStop(1, `rgba(0,0,0,${themeConfig.vignetteAlpha})`);
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
@@ -321,16 +385,16 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
 
       constructor(index: number) {
         this.index = index;
-        this.amp = config.waveAmpBase + index * config.waveAmpStep;
-        this.freq = config.waveFreqBase - index * config.waveFreqStep;
-        this.speed = config.waveSpeedBase + index * config.waveSpeedStep;
+        this.amp = themeConfig.waveAmpBase + index * themeConfig.waveAmpStep;
+        this.freq = themeConfig.waveFreqBase - index * themeConfig.waveFreqStep;
+        this.speed = themeConfig.waveSpeedBase + index * themeConfig.waveSpeedStep;
         this.yBase = 0;
-        this.opacity = config.waveOpacityBase - index * config.waveOpacityStep;
-        this.hue = config.waveHueBase - index * config.waveHueStep;
+        this.opacity = themeConfig.waveOpacityBase - index * themeConfig.waveOpacityStep;
+        this.hue = presetConfig.waveHueBase - index * presetConfig.waveHueStep;
       }
 
       onResize() {
-        this.yBase = h * config.waveYOffsetBase + this.index * config.waveYOffsetStep;
+        this.yBase = h * themeConfig.waveYOffsetBase + this.index * themeConfig.waveYOffsetStep;
       }
 
       yAt(x: number) {
@@ -391,7 +455,7 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
 
     function initWaves() {
       waves.length = 0;
-      for (let i = 0; i < config.waveCount; i++) {
+      for (let i = 0; i < themeConfig.waveCount; i++) {
         const wave = new Wave(i);
         wave.onResize();
         waves.push(wave);
@@ -412,6 +476,11 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
 
     const onResize = () => resize();
     window.addEventListener('resize', onResize);
+    let observer: ResizeObserver | null = null;
+    if (!fixed && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => resize());
+      observer.observe(canvas);
+    }
 
     resize();
     animate();
@@ -419,14 +488,15 @@ export function AnimatedBackground({ theme = 'dynamic-waves' }: AnimatedBackgrou
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       window.removeEventListener('resize', onResize);
-      document.body.style.background = prevBg;
+      observer?.disconnect();
+      if (fixed) document.body.style.background = prevBg;
     };
-  }, [theme]);
+  }, [theme, preset, fixed]);
 
   return (
     <canvas
       ref={canvasRef}
-      className="fixed inset-0 -z-10 block"
+      className={className ?? (fixed ? 'fixed inset-0 -z-10 block' : 'block h-full w-full')}
       style={{ width: '100%', height: '100%' }}
     />
   );
