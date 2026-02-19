@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { LayoutGrid, Columns3, CalendarDays, FileText, Link2, Sparkles, TrendingUp } from 'lucide-react';
+import { Columns3, CalendarDays, FileText, Link2, Sparkles, TrendingUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type Stats = {
@@ -11,7 +11,17 @@ type Stats = {
   totalResources: number;
 };
 
-export function OverviewView({ projectId }: { projectId: string }) {
+type OverviewTab = 'overview' | 'board' | 'planner' | 'files' | 'resources';
+
+export function OverviewView({
+  projectId,
+  onNavigate,
+  onOpenGeneratePlan,
+}: {
+  projectId: string;
+  onNavigate?: (tab: OverviewTab) => void;
+  onOpenGeneratePlan?: () => void;
+}) {
   const [stats, setStats] = useState<Stats>({
     totalCards: 0,
     completedCards: 0,
@@ -62,6 +72,12 @@ export function OverviewView({ projectId }: { projectId: string }) {
   const stepProgress =
     stats.totalSteps > 0 ? Math.round((stats.completedSteps / stats.totalSteps) * 100) : 0;
   const overallProgress = Math.round(cardProgress * 0.7 + stepProgress * 0.3);
+  const openTaskCount = stats.totalSteps - stats.completedSteps;
+  const openCardCount = stats.totalCards - stats.completedCards;
+  const executionLabel =
+    overallProgress >= 75 ? 'Strong momentum' : overallProgress >= 40 ? 'Steady progress' : 'Needs focus';
+  const suggestedAction =
+    openTaskCount > openCardCount ? 'Planner has more open work. Tighten priorities first.' : 'Board has more open work. Move blockers to active lanes.';
 
   if (loading) {
     return (
@@ -160,40 +176,42 @@ export function OverviewView({ projectId }: { projectId: string }) {
         <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-6">
           <div className="flex items-center gap-2 mb-4">
             <Sparkles className="w-5 h-5 text-slate-400" />
-            <div className="text-lg font-semibold">AI Insights</div>
+            <div className="text-lg font-semibold">Project Signals</div>
           </div>
 
-          {stats.totalSteps > 0 ? (
-            <div className="space-y-3">
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 text-blue-400" />
-                </div>
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-blue-200">AI Plan Active</div>
-                  <div className="text-xs text-blue-300/70">{stats.totalSteps} steps generated</div>
-                </div>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                <TrendingUp className="w-5 h-5 text-blue-300" />
               </div>
-              <div className="text-sm text-slate-400">
-                {stats.totalFiles} files were analyzed to create your customized plan.
-              </div>
-              <button className="w-full px-4 py-2 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-200 text-sm transition-colors">
-                Regenerate Plan from Files
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="text-sm text-slate-400">
-                Generate an AI-powered plan based on your project files.
-              </div>
-              <button className="w-full px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors">
-                Generate AI Plan
-              </button>
-              <div className="text-xs text-slate-500 text-center">
-                AI will analyze {stats.totalFiles} files in your project
+              <div className="flex-1">
+                <div className="text-sm font-medium text-blue-200">{executionLabel}</div>
+                <div className="text-xs text-blue-300/70">{overallProgress}% overall completion</div>
               </div>
             </div>
-          )}
+
+            <div className="rounded-xl border border-slate-800/60 bg-slate-950/40 p-3">
+              <div className="text-sm text-slate-200">Open workload</div>
+              <div className="mt-1 text-xs text-slate-400">
+                {openTaskCount} planner tasks and {openCardCount} board cards still open.
+              </div>
+            </div>
+
+            <div className="text-sm text-slate-400">{suggestedAction}</div>
+
+            <button
+              onClick={() => onNavigate?.(openTaskCount > openCardCount ? 'planner' : 'board')}
+              className="w-full px-4 py-2 rounded-xl border border-slate-700/70 bg-slate-900/35 hover:bg-slate-900/50 text-slate-200 text-sm transition-colors"
+            >
+              Jump to Suggested Workspace
+            </button>
+            <button
+              onClick={onOpenGeneratePlan}
+              className="w-full px-4 py-2 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-200 text-sm transition-colors"
+            >
+              Open AI Plan Builder
+            </button>
+          </div>
         </div>
       </div>
 
@@ -204,21 +222,25 @@ export function OverviewView({ projectId }: { projectId: string }) {
             icon={<Columns3 className="w-5 h-5" />}
             label="Go to Board"
             count={stats.totalCards}
+            onClick={() => onNavigate?.('board')}
           />
           <QuickActionButton
             icon={<CalendarDays className="w-5 h-5" />}
             label="Go to Planner"
             count={stats.totalSteps}
+            onClick={() => onNavigate?.('planner')}
           />
           <QuickActionButton
             icon={<FileText className="w-5 h-5" />}
             label="Go to Files"
             count={stats.totalFiles}
+            onClick={() => onNavigate?.('files')}
           />
           <QuickActionButton
             icon={<Link2 className="w-5 h-5" />}
             label="Go to Resources"
             count={stats.totalResources}
+            onClick={() => onNavigate?.('resources')}
           />
         </div>
       </div>
@@ -273,13 +295,18 @@ function QuickActionButton({
   icon,
   label,
   count,
+  onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   count: number;
+  onClick?: () => void;
 }) {
   return (
-    <button className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-800/60 bg-slate-950/40 hover:bg-slate-900/50 hover:border-slate-700/70 transition-colors">
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center gap-2 p-4 rounded-2xl border border-slate-800/60 bg-slate-950/40 hover:bg-slate-900/50 hover:border-slate-700/70 transition-colors"
+    >
       <div className="text-slate-300">{icon}</div>
       <div className="text-sm font-medium text-slate-200 text-center">{label}</div>
       {count > 0 && <div className="text-xs text-slate-400">{count} items</div>}

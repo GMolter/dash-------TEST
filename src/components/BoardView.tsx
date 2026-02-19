@@ -34,6 +34,8 @@ export function BoardView({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(true);
   const [draggedCard, setDraggedCard] = useState<string | null>(null);
   const [selectedCard, setSelectedCard] = useState<BoardCard | null>(null);
+  const [addingLane, setAddingLane] = useState(false);
+  const [newLaneName, setNewLaneName] = useState('');
 
   async function loadBoard() {
     const [colsRes, cardsRes] = await Promise.all([
@@ -82,6 +84,34 @@ export function BoardView({ projectId }: { projectId: string }) {
       if (data) {
         setColumns((prev) => [...prev, data as BoardColumn]);
       }
+    }
+  }
+
+  async function createColumn(name: string) {
+    const laneName = name.trim();
+    if (!laneName) return;
+
+    const nextPosition = Math.max(0, ...columns.map((c) => c.position || 0)) + 10;
+    const { data, error } = await supabase
+      .from('project_board_columns')
+      .insert({
+        project_id: projectId,
+        name: laneName,
+        position: nextPosition,
+        archived: false,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Error creating column:', error);
+      return;
+    }
+
+    if (data) {
+      setColumns((prev) => [...prev, data as BoardColumn].sort((a, b) => a.position - b.position));
+      setAddingLane(false);
+      setNewLaneName('');
     }
   }
 
@@ -161,15 +191,70 @@ export function BoardView({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-6 min-h-[520px]">
+      <div className="rounded-3xl border border-slate-800/60 bg-slate-950/35 backdrop-blur p-4 sm:p-6 min-h-[520px]">
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <div className="text-2xl font-semibold">Board</div>
             <div className="text-slate-300">Organize tasks across columns</div>
           </div>
+          {!addingLane ? (
+            <button
+              onClick={() => setAddingLane(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-200 text-sm transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add Swim Lane
+            </button>
+          ) : null}
         </div>
 
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        {addingLane && (
+          <div className="mb-4 rounded-2xl border border-slate-800/60 bg-slate-950/45 p-3 sm:p-4">
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+              <input
+                type="text"
+                value={newLaneName}
+                onChange={(e) => setNewLaneName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    void createColumn(newLaneName);
+                  }
+                  if (e.key === 'Escape') {
+                    setAddingLane(false);
+                    setNewLaneName('');
+                  }
+                }}
+                placeholder="Lane name (e.g. QA, Blocked)"
+                autoFocus
+                className="flex-1 rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => void createColumn(newLaneName)}
+                  disabled={!newLaneName.trim()}
+                  className={`px-3 py-2 rounded-xl text-sm transition-colors ${
+                    newLaneName.trim()
+                      ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                      : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  Create Lane
+                </button>
+                <button
+                  onClick={() => {
+                    setAddingLane(false);
+                    setNewLaneName('');
+                  }}
+                  className="px-3 py-2 rounded-xl border border-slate-800/70 hover:bg-slate-900/45 text-slate-300 text-sm"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 snap-x snap-mandatory">
           {columns.map((col) => (
             <BoardColumnView
               key={col.id}
@@ -234,7 +319,7 @@ function BoardColumnView({
 
   return (
     <div
-      className="flex-shrink-0 w-80 rounded-2xl border border-slate-800/60 bg-slate-950/40 p-4"
+      className="flex-shrink-0 w-[min(85vw,24rem)] sm:w-[22rem] rounded-2xl border border-slate-800/60 bg-slate-950/40 p-3 sm:p-4 snap-start"
       onDragOver={onDragOver}
       onDrop={(e) => {
         e.preventDefault();

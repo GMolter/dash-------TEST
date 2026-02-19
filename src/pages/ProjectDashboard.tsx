@@ -225,8 +225,19 @@ export function ProjectDashboard({
   const [quickLinkError, setQuickLinkError] = useState<string | null>(null);
 
   const [plannerFocusSignal, setPlannerFocusSignal] = useState(0);
+  const [plannerGenerateSignal, setPlannerGenerateSignal] = useState(0);
   const [highlightResourceId, setHighlightResourceId] = useState<string | null>(null);
   const handleHighlightConsumed = useCallback(() => setHighlightResourceId(null), []);
+
+  function navigateProjectTab(nextTab: Tab) {
+    setTab(nextTab);
+    if (nextTab === 'files') setBranchOpen(true);
+  }
+
+  function openPlannerGenerateModal() {
+    setTab('planner');
+    setPlannerGenerateSignal((v) => v + 1);
+  }
 
   async function loadProject() {
     if (!projectId) {
@@ -1084,10 +1095,20 @@ export function ProjectDashboard({
                   : 'col-span-12 lg:col-span-9 2xl:col-span-10'
               }
             >
-              {tab === 'overview' && projectId && <OverviewView projectId={projectId} />}
+              {tab === 'overview' && projectId && (
+                <OverviewView
+                  projectId={projectId}
+                  onNavigate={navigateProjectTab}
+                  onOpenGeneratePlan={openPlannerGenerateModal}
+                />
+              )}
               {tab === 'board' && projectId && <BoardView projectId={projectId} />}
               {tab === 'planner' && projectId && (
-                <PlannerView projectId={projectId} focusNewTaskSignal={plannerFocusSignal} />
+                <PlannerView
+                  projectId={projectId}
+                  focusNewTaskSignal={plannerFocusSignal}
+                  openGenerateSignal={plannerGenerateSignal}
+                />
               )}
               {tab === 'resources' && projectId && (
                 <ResourcesView
