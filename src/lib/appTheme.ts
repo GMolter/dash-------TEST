@@ -1,4 +1,4 @@
-export type AppBackgroundTheme = 'dynamic-waves' | 'aurora-lattice';
+export type AppBackgroundTheme = 'dynamic-waves' | 'contour-drift' | 'aurora-lattice';
 export type AppBackgroundPreset = 'indigo' | 'ocean' | 'teal' | 'sunset';
 
 export const APP_BACKGROUND_THEME_STORAGE_KEY = 'appBackgroundTheme';
@@ -26,6 +26,12 @@ export const APP_BACKGROUND_THEME_OPTIONS: AppBackgroundThemeOption[] = [
     id: 'dynamic-waves',
     name: 'Dynamic Waves',
     subtitle: 'Current app theme',
+    status: 'stable',
+  },
+  {
+    id: 'contour-drift',
+    name: 'Contour Drift',
+    subtitle: 'Topographic flow field',
     status: 'stable',
   },
   {

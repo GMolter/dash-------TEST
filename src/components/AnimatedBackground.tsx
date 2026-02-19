@@ -1,11 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { AppBackgroundPreset, AppBackgroundTheme } from '../lib/appTheme';
 
-// Canvas background adapted from the HTML you provided.
-// - Fixed, full-screen canvas
-// - Subtle gradient + drifting dots + grid + waves + grain + vignette
-// - DPR capped for performance
-type ThemeConfig = {
+type WaveThemeConfig = {
   noiseAlpha: number;
   vignetteAlpha: number;
   waveCount: number;
@@ -17,8 +13,6 @@ type ThemeConfig = {
   waveSpeedStep: number;
   waveOpacityBase: number;
   waveOpacityStep: number;
-  waveHueBase: number;
-  waveHueStep: number;
   waveYOffsetBase: number;
   waveYOffsetStep: number;
 };
@@ -32,9 +26,12 @@ type PresetConfig = {
   dotColor: string;
   waveHueBase: number;
   waveHueStep: number;
+  contourLinePair: [string, string];
+  contourFillColor: string;
+  contourGlowColor: string;
 };
 
-const THEME_CONFIGS: Record<AppBackgroundTheme, ThemeConfig> = {
+const WAVE_THEME_CONFIGS: Record<Exclude<AppBackgroundTheme, 'contour-drift'>, WaveThemeConfig> = {
   'dynamic-waves': {
     noiseAlpha: 0.12,
     vignetteAlpha: 0.55,
@@ -86,6 +83,9 @@ const PRESET_CONFIGS: Record<AppBackgroundPreset, PresetConfig> = {
     dotColor: '190,205,255',
     waveHueBase: 228,
     waveHueStep: 10,
+    contourLinePair: ['#4fa8ff', '#3d6fff'],
+    contourFillColor: '#07101f',
+    contourGlowColor: 'rgba(15,40,100,0.10)',
   },
   ocean: {
     bodyBackground: '#06101b',
@@ -105,6 +105,9 @@ const PRESET_CONFIGS: Record<AppBackgroundPreset, PresetConfig> = {
     dotColor: '186,230,253',
     waveHueBase: 202,
     waveHueStep: 8,
+    contourLinePair: ['#00c8e0', '#3d6fff'],
+    contourFillColor: '#07101f',
+    contourGlowColor: 'rgba(15,40,100,0.12)',
   },
   teal: {
     bodyBackground: '#041114',
@@ -124,6 +127,9 @@ const PRESET_CONFIGS: Record<AppBackgroundPreset, PresetConfig> = {
     dotColor: '153,246,228',
     waveHueBase: 174,
     waveHueStep: 8,
+    contourLinePair: ['#00bcd4', '#4fc3f7'],
+    contourFillColor: '#06121c',
+    contourGlowColor: 'rgba(4,113,113,0.12)',
   },
   sunset: {
     bodyBackground: '#13080d',
@@ -143,6 +149,9 @@ const PRESET_CONFIGS: Record<AppBackgroundPreset, PresetConfig> = {
     dotColor: '253,186,116',
     waveHueBase: 336,
     waveHueStep: 10,
+    contourLinePair: ['#ff7a59', '#a855f7'],
+    contourFillColor: '#1a0f14',
+    contourGlowColor: 'rgba(111,21,66,0.14)',
   },
 };
 
@@ -163,7 +172,6 @@ export function AnimatedBackground({
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const themeConfig = THEME_CONFIGS[theme];
     const presetConfig = PRESET_CONFIGS[preset];
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -179,6 +187,8 @@ export function AnimatedBackground({
     let dpr = 1;
     let time = 0;
 
+    const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+
     type Dot = {
       x: number;
       y: number;
@@ -193,8 +203,6 @@ export function AnimatedBackground({
     let dots: Dot[] = [];
     let noiseCanvas: HTMLCanvasElement | null = null;
     let noiseCtx: CanvasRenderingContext2D | null = null;
-
-    const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
     function initDots() {
       const area = w * h;
@@ -225,7 +233,7 @@ export function AnimatedBackground({
         img.data[i] = v;
         img.data[i + 1] = v;
         img.data[i + 2] = v;
-        img.data[i + 3] = 18; // alpha baked in
+        img.data[i + 3] = 18;
       }
       noiseCtx.putImageData(img, 0, 0);
     }
@@ -245,14 +253,14 @@ export function AnimatedBackground({
       canvas.height = Math.floor(h * dpr);
       canvas.style.width = w + 'px';
       canvas.style.height = h + 'px';
-
-      // Scale drawing coords back to CSS pixels.
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       initDots();
       buildNoise();
-      initWaves();
-      waves.forEach((wave) => wave.onResize());
+      if (theme !== 'contour-drift') {
+        initWaves();
+        waves.forEach((wave) => wave.onResize());
+      }
     }
 
     function drawBaseGradient() {
@@ -344,11 +352,11 @@ export function AnimatedBackground({
       ctx.restore();
     }
 
-    function drawNoise() {
+    function drawNoise(alpha: number) {
       if (!noiseCanvas) return;
       ctx.save();
       ctx.globalCompositeOperation = 'overlay';
-      ctx.globalAlpha = themeConfig.noiseAlpha;
+      ctx.globalAlpha = alpha;
       const pattern = ctx.createPattern(noiseCanvas, 'repeat');
       if (pattern) {
         ctx.fillStyle = pattern;
@@ -357,7 +365,7 @@ export function AnimatedBackground({
       ctx.restore();
     }
 
-    function drawVignette() {
+    function drawVignette(alpha: number) {
       ctx.save();
       const vg = ctx.createRadialGradient(
         w * 0.5,
@@ -368,11 +376,16 @@ export function AnimatedBackground({
         Math.max(w, h) * 0.75
       );
       vg.addColorStop(0, 'rgba(0,0,0,0)');
-      vg.addColorStop(1, `rgba(0,0,0,${themeConfig.vignetteAlpha})`);
+      vg.addColorStop(1, `rgba(0,0,0,${alpha})`);
       ctx.fillStyle = vg;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
     }
+
+    const waves: Array<{
+      onResize: () => void;
+      draw: () => void;
+    }> = [];
 
     class Wave {
       index: number;
@@ -382,9 +395,11 @@ export function AnimatedBackground({
       yBase: number;
       opacity: number;
       hue: number;
+      themeConfig: WaveThemeConfig;
 
-      constructor(index: number) {
+      constructor(index: number, themeConfig: WaveThemeConfig) {
         this.index = index;
+        this.themeConfig = themeConfig;
         this.amp = themeConfig.waveAmpBase + index * themeConfig.waveAmpStep;
         this.freq = themeConfig.waveFreqBase - index * themeConfig.waveFreqStep;
         this.speed = themeConfig.waveSpeedBase + index * themeConfig.waveSpeedStep;
@@ -394,7 +409,7 @@ export function AnimatedBackground({
       }
 
       onResize() {
-        this.yBase = h * themeConfig.waveYOffsetBase + this.index * themeConfig.waveYOffsetStep;
+        this.yBase = h * this.themeConfig.waveYOffsetBase + this.index * this.themeConfig.waveYOffsetStep;
       }
 
       yAt(x: number) {
@@ -413,7 +428,6 @@ export function AnimatedBackground({
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
 
-        // Fill body
         ctx.beginPath();
         ctx.moveTo(0, this.yBase);
         for (let x = 0; x <= w; x += 6) ctx.lineTo(x, this.yAt(x));
@@ -428,51 +442,300 @@ export function AnimatedBackground({
         ctx.fillStyle = g;
         ctx.fill();
 
-        // Glow line
         ctx.globalAlpha = 1;
         ctx.lineWidth = 2;
         ctx.shadowBlur = 18;
         ctx.shadowColor = `hsla(${this.hue}, 85%, 65%, ${this.opacity * 2.2})`;
         ctx.strokeStyle = `hsla(${this.hue}, 85%, 65%, ${this.opacity * 2.0})`;
-
         ctx.beginPath();
         ctx.moveTo(0, this.yBase);
         for (let x = 0; x <= w; x += 6) ctx.lineTo(x, this.yAt(x));
         ctx.stroke();
 
-        // Crisp line
         ctx.shadowBlur = 0;
         ctx.globalAlpha = 0.75;
         ctx.lineWidth = 1;
         ctx.strokeStyle = `hsla(${this.hue + 8}, 90%, 78%, ${this.opacity * 1.4})`;
         ctx.stroke();
-
         ctx.restore();
       }
     }
 
-    const waves: Wave[] = [];
-
     function initWaves() {
       waves.length = 0;
+      if (theme === 'contour-drift') return;
+      const themeConfig = WAVE_THEME_CONFIGS[theme];
       for (let i = 0; i < themeConfig.waveCount; i++) {
-        const wave = new Wave(i);
+        const wave = new Wave(i, themeConfig);
         wave.onResize();
         waves.push(wave);
       }
     }
 
-    function animate() {
+    const perm = new Uint8Array(512);
+    {
+      const p = Array.from({ length: 256 }, (_, i) => i);
+      for (let i = 255; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [p[i], p[j]] = [p[j], p[i]];
+      }
+      for (let i = 0; i < 512; i++) perm[i] = p[i & 255];
+    }
+
+    const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+    const grad = (hash: number, x: number, y: number, z: number) => {
+      const hsh = hash & 15;
+      const u = hsh < 8 ? x : y;
+      const v = hsh < 4 ? y : hsh === 12 || hsh === 14 ? x : z;
+      return ((hsh & 1) === 0 ? u : -u) + ((hsh & 2) === 0 ? v : -v);
+    };
+
+    const noise = (x: number, y: number, z = 0) => {
+      const X = Math.floor(x) & 255;
+      const Y = Math.floor(y) & 255;
+      const Z = Math.floor(z) & 255;
+      x -= Math.floor(x);
+      y -= Math.floor(y);
+      z -= Math.floor(z);
+      const u = fade(x);
+      const v = fade(y);
+      const wv = fade(z);
+      const A = perm[X] + Y;
+      const AA = perm[A] + Z;
+      const AB = perm[A + 1] + Z;
+      const B = perm[X + 1] + Y;
+      const BA = perm[B] + Z;
+      const BB = perm[B + 1] + Z;
+      return lerp(
+        lerp(lerp(grad(perm[AA], x, y, z), grad(perm[BA], x - 1, y, z), u), lerp(grad(perm[AB], x, y - 1, z), grad(perm[BB], x - 1, y - 1, z), u), v),
+        lerp(lerp(grad(perm[AA + 1], x, y, z - 1), grad(perm[BA + 1], x - 1, y, z - 1), u), lerp(grad(perm[AB + 1], x, y - 1, z - 1), grad(perm[BB + 1], x - 1, y - 1, z - 1), u), v),
+        wv
+      );
+    };
+
+    const fbm = (x: number, y: number, z: number) =>
+      noise(x, y, z) * 0.5 +
+      noise(x * 1.9, y * 1.9, z * 1.3) * 0.25 +
+      noise(x * 3.7, y * 3.7, z * 1.7) * 0.125 +
+      noise(x * 7.5, y * 7.5, z * 2.1) * 0.0625;
+
+    const marchingTable: Array<Array<[number, number]>> = [
+      [],
+      [[2, 3]],
+      [[1, 2]],
+      [[1, 3]],
+      [[0, 1]],
+      [[0, 1], [2, 3]],
+      [[0, 2]],
+      [[0, 3]],
+      [[0, 3]],
+      [[0, 2]],
+      [[0, 3], [1, 2]],
+      [[0, 1]],
+      [[1, 3]],
+      [[1, 2]],
+      [[2, 3]],
+      [],
+    ];
+
+    const edgePoint = (corners: [number, number, number, number], edge: number, thr: number): [number, number] | null => {
+      const [c0, c1, c2, c3] = corners;
+      let t = 0;
+      switch (edge) {
+        case 0:
+          t = (thr - c0) / (c1 - c0);
+          return [t, 0];
+        case 1:
+          t = (thr - c1) / (c2 - c1);
+          return [1, t];
+        case 2:
+          t = (thr - c3) / (c2 - c3);
+          return [t, 1];
+        case 3:
+          t = (thr - c0) / (c3 - c0);
+          return [0, t];
+        default:
+          return null;
+      }
+    };
+
+    type Segment = { x1: number; y1: number; x2: number; y2: number };
+    type Point = { x: number; y: number };
+
+    const buildChains = (segments: Segment[]): Point[][] => {
+      const adj = new Map<string, Array<{ segIdx: number; isStart: boolean }>>();
+      const addAdj = (key: string, segIdx: number, isStart: boolean) => {
+        const list = adj.get(key) ?? [];
+        list.push({ segIdx, isStart });
+        adj.set(key, list);
+      };
+
+      for (let i = 0; i < segments.length; i++) {
+        const s = segments[i];
+        const k1 = `${Math.round(s.x1 * 2)},${Math.round(s.y1 * 2)}`;
+        const k2 = `${Math.round(s.x2 * 2)},${Math.round(s.y2 * 2)}`;
+        addAdj(k1, i, true);
+        addAdj(k2, i, false);
+      }
+
+      const used = new Uint8Array(segments.length);
+      const chains: Point[][] = [];
+
+      for (let si = 0; si < segments.length; si++) {
+        if (used[si]) continue;
+        used[si] = 1;
+        const s = segments[si];
+        const chain: Point[] = [{ x: s.x1, y: s.y1 }, { x: s.x2, y: s.y2 }];
+
+        for (let pass = 0; pass < 2; pass++) {
+          let going = true;
+          while (going) {
+            going = false;
+            const tip = pass === 0 ? chain[chain.length - 1] : chain[0];
+            const key = `${Math.round(tip.x * 2)},${Math.round(tip.y * 2)}`;
+            const neighbors = adj.get(key) ?? [];
+            for (const { segIdx, isStart } of neighbors) {
+              if (used[segIdx]) continue;
+              used[segIdx] = 1;
+              const ns = segments[segIdx];
+              const nx = isStart ? ns.x2 : ns.x1;
+              const ny = isStart ? ns.y2 : ns.y1;
+              if (pass === 0) chain.push({ x: nx, y: ny });
+              else chain.unshift({ x: nx, y: ny });
+              going = true;
+              break;
+            }
+          }
+        }
+
+        if (chain.length > 2) chains.push(chain);
+      }
+
+      return chains;
+    };
+
+    const toRgba = (hex: string, alpha: number) => {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+    };
+
+    const drawWaves = () => {
+      const themeConfig = WAVE_THEME_CONFIGS[theme as Exclude<AppBackgroundTheme, 'contour-drift'>];
       drawBaseGradient();
       drawGrid();
       drawDots();
       for (const wave of waves) wave.draw();
-      drawNoise();
-      drawVignette();
-
+      drawNoise(themeConfig.noiseAlpha);
+      drawVignette(themeConfig.vignetteAlpha);
       time += 0.3;
-      rafRef.current = requestAnimationFrame(animate);
-    }
+      rafRef.current = requestAnimationFrame(drawWaves);
+    };
+
+    const drawContourDrift = () => {
+      const NUM_CONTOURS = 24;
+      const CELL = 6;
+      const SCALE = 0.0015;
+      const SPEED = 0.00011;
+      time += SPEED;
+
+      ctx.fillStyle = presetConfig.contourFillColor;
+      ctx.fillRect(0, 0, w, h);
+
+      const glow = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.65);
+      glow.addColorStop(0, presetConfig.contourGlowColor);
+      glow.addColorStop(1, 'rgba(2,4,14,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+
+      const cols = Math.ceil(w / CELL) + 2;
+      const rows = Math.ceil(h / CELL) + 2;
+      const field = new Float32Array(cols * rows);
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          field[r * cols + c] = fbm(c * CELL * SCALE, r * CELL * SCALE, time);
+        }
+      }
+
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      for (let ci = 0; ci < NUM_CONTOURS; ci++) {
+        const thr = -0.9 + (ci / (NUM_CONTOURS - 1)) * 1.8;
+        const contourT = ci / (NUM_CONTOURS - 1);
+        const alpha = 0.42 + 0.38 * Math.sin(contourT * Math.PI);
+        const lineWidth = 1.1 + 0.6 * Math.sin(contourT * Math.PI);
+        const [colA, colB] = presetConfig.contourLinePair;
+
+        const rawSegs: Segment[] = [];
+        for (let r = 0; r < rows - 1; r++) {
+          for (let c = 0; c < cols - 1; c++) {
+            const v0 = field[r * cols + c];
+            const v1 = field[r * cols + c + 1];
+            const v2 = field[(r + 1) * cols + c + 1];
+            const v3 = field[(r + 1) * cols + c];
+            const corners: [number, number, number, number] = [v0, v1, v2, v3];
+            const mask = (v0 > thr ? 8 : 0) | (v1 > thr ? 4 : 0) | (v2 > thr ? 2 : 0) | (v3 > thr ? 1 : 0);
+            const px = c * CELL;
+            const py = r * CELL;
+
+            for (const [edgeA, edgeB] of marchingTable[mask]) {
+              const pA = edgePoint(corners, edgeA, thr);
+              const pB = edgePoint(corners, edgeB, thr);
+              if (!pA || !pB) continue;
+
+              const x1 = px + pA[0] * CELL;
+              const y1 = py + pA[1] * CELL;
+              const x2 = px + pB[0] * CELL;
+              const y2 = py + pB[1] * CELL;
+              if (!isFinite(x1 + y1 + x2 + y2)) continue;
+              rawSegs.push({ x1, y1, x2, y2 });
+            }
+          }
+        }
+
+        const chains = buildChains(rawSegs);
+        ctx.lineWidth = lineWidth;
+
+        for (const chain of chains) {
+          let minX = Number.POSITIVE_INFINITY;
+          let maxX = Number.NEGATIVE_INFINITY;
+          let minY = Number.POSITIVE_INFINITY;
+          let maxY = Number.NEGATIVE_INFINITY;
+          for (const pt of chain) {
+            if (pt.x < minX) minX = pt.x;
+            if (pt.x > maxX) maxX = pt.x;
+            if (pt.y < minY) minY = pt.y;
+            if (pt.y > maxY) maxY = pt.y;
+          }
+
+          const dx = maxX - minX;
+          const dy = maxY - minY;
+          const grad = dx >= dy ? ctx.createLinearGradient(minX, 0, maxX, 0) : ctx.createLinearGradient(0, minY, 0, maxY);
+          grad.addColorStop(0, toRgba(colA, alpha * 0.35));
+          grad.addColorStop(0.3, toRgba(colA, alpha));
+          grad.addColorStop(0.7, toRgba(colB, alpha));
+          grad.addColorStop(1, toRgba(colB, alpha * 0.35));
+
+          ctx.beginPath();
+          ctx.moveTo(chain[0].x, chain[0].y);
+          for (let i = 1; i < chain.length; i++) ctx.lineTo(chain[i].x, chain[i].y);
+          ctx.strokeStyle = grad;
+          ctx.stroke();
+        }
+      }
+
+      const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.2, w / 2, h / 2, Math.hypot(w, h) * 0.58);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(3,6,18,0.65)');
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, w, h);
+
+      rafRef.current = requestAnimationFrame(drawContourDrift);
+    };
 
     const onResize = () => resize();
     window.addEventListener('resize', onResize);
@@ -483,7 +746,8 @@ export function AnimatedBackground({
     }
 
     resize();
-    animate();
+    if (theme === 'contour-drift') drawContourDrift();
+    else drawWaves();
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
