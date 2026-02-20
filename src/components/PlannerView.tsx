@@ -901,6 +901,14 @@ function GeneratePlannerModal({
   >([]);
   const [liveBuffer, setLiveBuffer] = useState<string[]>([]);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
   async function generate(mode: 'generate' | 'regenerate') {
     if (!goal.trim()) {
       setError('Add a project goal before generating.');
@@ -919,6 +927,7 @@ function GeneratePlannerModal({
       'Finalizing suggestions...',
     ];
     let bufferIdx = 0;
+    let waitingShown = false;
     const timer = window.setInterval(() => {
       setLiveBuffer((prev) => {
         if (bufferIdx < stagedBuffer.length) {
@@ -926,7 +935,9 @@ function GeneratePlannerModal({
           bufferIdx += 1;
           return next;
         }
-        return [...prev.slice(-5), 'Waiting for AI response...'];
+        if (waitingShown) return prev;
+        waitingShown = true;
+        return [...prev, 'Waiting for AI response...'];
       });
     }, 850);
 
@@ -1054,7 +1065,7 @@ function GeneratePlannerModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
       <button className="absolute inset-0" onClick={onClose} aria-label="Close" />
-      <div className="relative w-full max-w-6xl rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl p-5 sm:p-6 max-h-[92vh] overflow-hidden flex flex-col">
+      <div className="relative w-[min(97vw,1680px)] h-[94vh] rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl p-5 sm:p-6 overflow-y-auto scrollbar-theme">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-xl font-semibold">Generate Plan with AI</div>
@@ -1070,7 +1081,7 @@ function GeneratePlannerModal({
           </button>
         </div>
 
-        <div className="mt-5 flex-1 overflow-y-auto pr-1 scrollbar-theme">
+        <div className="mt-5 pr-1">
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
               <div className="text-sm font-medium text-slate-200 mb-2">1) Project goal</div>
@@ -1231,7 +1242,7 @@ function GeneratePlannerModal({
           )}
         </div>
 
-        <div className="pt-4 mt-4 border-t border-slate-800/70 flex flex-wrap items-center justify-end gap-2">
+        <div className="pt-4 mt-4 border-t border-slate-800/70 flex flex-wrap items-center justify-end gap-2 sticky bottom-0 bg-slate-950/95">
           <button
             onClick={onClose}
             className="px-4 py-2.5 rounded-xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45 text-slate-200"
