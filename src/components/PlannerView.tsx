@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   CheckCircle2,
   Circle,
@@ -1062,8 +1063,10 @@ function GeneratePlannerModal({
 
   const hasSuggestions = generatedTasks.length > 0 || deletionSuggestions.length > 0;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[2147483647] isolate flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
       <button className="absolute inset-0" onClick={onClose} aria-label="Close" />
       <div className="relative w-[min(97vw,1680px)] h-[94vh] rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl p-5 sm:p-6 overflow-y-auto scrollbar-theme">
         <div className="flex items-start justify-between gap-4">
@@ -1274,7 +1277,8 @@ function GeneratePlannerModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
