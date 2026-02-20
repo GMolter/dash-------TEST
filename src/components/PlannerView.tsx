@@ -1084,7 +1084,7 @@ function GeneratePlannerModal({
           </button>
         </div>
 
-        <div className="mt-5 pr-1">
+        <div className="mt-5 pr-1 pb-32">
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
               <div className="text-sm font-medium text-slate-200 mb-2">1) Project goal</div>
@@ -1245,7 +1245,7 @@ function GeneratePlannerModal({
           )}
         </div>
 
-        <div className="pt-4 mt-4 border-t border-slate-800/70 flex flex-wrap items-center justify-end gap-2 sticky bottom-0 bg-slate-950/95">
+        <div className="pt-4 mt-4 border-t border-slate-800/70 flex flex-wrap items-center justify-end gap-2 sticky bottom-0 z-20 bg-slate-950/98 backdrop-blur-md shadow-[0_-10px_30px_rgba(2,6,23,0.85)]">
           <button
             onClick={onClose}
             className="px-4 py-2.5 rounded-xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45 text-slate-200"
