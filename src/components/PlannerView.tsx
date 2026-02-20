@@ -44,11 +44,20 @@ type GeneratedDeletionSuggestion = {
   reason: string;
 };
 
+type PlannerUsage = {
+  used: number;
+  limit: number;
+  unlimited: boolean;
+  remaining: number | null;
+};
+
 type PlannerBoardColumn = {
   id: string;
   name: string;
   position: number;
 };
+
+const PROJECT_AI_USAGE_LIMIT = 5;
 
 function clipText(value: unknown, max: number) {
   const text = typeof value === 'string' ? value.trim() : '';
@@ -101,12 +110,7 @@ export function PlannerView({
   projectId: string;
   focusNewTaskSignal?: number;
   openGenerateSignal?: number;
-  onAiUsageUpdate?: (usage: {
-    used: number;
-    limit: number;
-    unlimited: boolean;
-    remaining: number | null;
-  }) => void;
+  onAiUsageUpdate?: (usage: PlannerUsage) => void;
 }) {
   const [steps, setSteps] = useState<PlannerStep[]>([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -936,12 +940,7 @@ function GeneratePlannerModal({
 }: {
   projectId: string;
   currentSteps: PlannerStep[];
-  onAiUsageUpdate?: (usage: {
-    used: number;
-    limit: number;
-    unlimited: boolean;
-    remaining: number | null;
-  }) => void;
+  onAiUsageUpdate?: (usage: PlannerUsage) => void;
   onAccept: (tasks: GeneratedPlannerTask[], deletions: GeneratedDeletionSuggestion[]) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -967,6 +966,59 @@ function GeneratePlannerModal({
     };
   }, []);
 
+  async function readProjectUsage(): Promise<
+    | { ok: true; usage: PlannerUsage }
+    | { ok: false; error: string; usage?: PlannerUsage }
+  > {
+    const { data, error: projectError } = await supabase
+      .from('projects')
+      .select('ai_plan_usage_count,ai_plan_unlimited')
+      .eq('id', projectId)
+      .maybeSingle();
+
+    if (projectError || !data) {
+      return { ok: false, error: 'Failed to check AI usage limit.' };
+    }
+
+    const used = Math.max(0, Number((data as any).ai_plan_usage_count || 0));
+    const unlimited = Boolean((data as any).ai_plan_unlimited);
+    const usage: PlannerUsage = {
+      used,
+      limit: PROJECT_AI_USAGE_LIMIT,
+      unlimited,
+      remaining: unlimited ? null : Math.max(0, PROJECT_AI_USAGE_LIMIT - used),
+    };
+    return { ok: true, usage };
+  }
+
+  async function incrementProjectUsage(currentUsage: PlannerUsage): Promise<
+    | { ok: true; usage: PlannerUsage }
+    | { ok: false; error: string; usage: PlannerUsage }
+  > {
+    if (currentUsage.unlimited) {
+      return { ok: true, usage: currentUsage };
+    }
+
+    const nextUsed = currentUsage.used + 1;
+    const { error: updateError } = await supabase
+      .from('projects')
+      .update({ ai_plan_usage_count: nextUsed, updated_at: new Date().toISOString() })
+      .eq('id', projectId);
+
+    const nextUsage: PlannerUsage = {
+      used: nextUsed,
+      limit: PROJECT_AI_USAGE_LIMIT,
+      unlimited: false,
+      remaining: Math.max(0, PROJECT_AI_USAGE_LIMIT - nextUsed),
+    };
+
+    if (updateError) {
+      return { ok: false, error: 'Failed to process AI usage limit.', usage: currentUsage };
+    }
+
+    return { ok: true, usage: nextUsage };
+  }
+
   async function generate(mode: 'generate' | 'regenerate') {
     if (!goal.trim()) {
       setError('Add a project goal before generating.');
@@ -975,6 +1027,24 @@ function GeneratePlannerModal({
 
     setWorking(true);
     setError(null);
+    setLiveBuffer(['Checking AI usage limit...']);
+
+    const usageState = await readProjectUsage();
+    if (!usageState.ok) {
+      setError(usageState.error);
+      setWorking(false);
+      return;
+    }
+    if (onAiUsageUpdate) onAiUsageUpdate(usageState.usage);
+
+    if (!usageState.usage.unlimited && usageState.usage.used >= PROJECT_AI_USAGE_LIMIT) {
+      setError(
+        `AI usage limit reached (${usageState.usage.used}/${usageState.usage.limit}).`,
+      );
+      setWorking(false);
+      return;
+    }
+
     setLiveBuffer(['Preparing project context...']);
 
     const stagedBuffer = [
@@ -1113,7 +1183,13 @@ function GeneratePlannerModal({
 
       setGeneratedTasks(tasks.filter((task) => !!task.title));
       setDeletionSuggestions(deletions);
-      if (json?.usage && onAiUsageUpdate) onAiUsageUpdate(json.usage);
+
+      const usageUpdate = await incrementProjectUsage(usageState.usage);
+      if (onAiUsageUpdate) onAiUsageUpdate(usageUpdate.usage);
+      if (!usageUpdate.ok) {
+        setError(usageUpdate.error);
+      }
+
       setLiveBuffer((prev) => [
         ...prev,
         `Done. ${tasks.length} task suggestion(s), ${deletions.length} deletion suggestion(s).`,
