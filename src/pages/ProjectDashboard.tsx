@@ -734,9 +734,24 @@ export function ProjectDashboard({
           usageCount: usageAdminUnlimited ? undefined : Math.floor(usageAdminCount),
         }),
       });
-      const j = await r.json();
+      const rawText = await r.text();
+      const j = (() => {
+        try {
+          return rawText ? JSON.parse(rawText) : {};
+        } catch {
+          return null;
+        }
+      })();
       if (!r.ok) {
-        setUsageAdminError(j?.error || 'Failed to update AI usage.');
+        const fallback =
+          typeof rawText === 'string' && rawText.trim()
+            ? rawText.slice(0, 220)
+            : `Failed to update AI usage (HTTP ${r.status}).`;
+        setUsageAdminError((j as any)?.error || fallback);
+        return;
+      }
+      if (!j || typeof j !== 'object') {
+        setUsageAdminError('Invalid response from usage override endpoint.');
         return;
       }
 
@@ -744,8 +759,8 @@ export function ProjectDashboard({
         prev
           ? {
               ...prev,
-              ai_plan_usage_count: Number(j?.usage?.used || 0),
-              ai_plan_unlimited: Boolean(j?.usage?.unlimited),
+              ai_plan_usage_count: Number((j as any)?.usage?.used || 0),
+              ai_plan_unlimited: Boolean((j as any)?.usage?.unlimited),
             }
           : prev,
       );

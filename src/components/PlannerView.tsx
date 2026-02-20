@@ -1158,7 +1158,7 @@ function GeneratePlannerModal({
       <div className="relative w-[min(97vw,1680px)] h-[94vh] rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl p-5 sm:p-6 overflow-y-auto scrollbar-theme">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-xl font-semibold">Generate Plan with AI</div>
+            <div className="text-xl font-semibold text-slate-100">Generate Plan with AI</div>
             <div className="text-sm text-slate-300 mt-1">
               Generate tasks, review due dates, and optionally apply AI-suggested cleanup.
             </div>
