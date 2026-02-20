@@ -54,10 +54,17 @@ export function PlannerView({
   projectId,
   focusNewTaskSignal = 0,
   openGenerateSignal = 0,
+  onAiUsageUpdate,
 }: {
   projectId: string;
   focusNewTaskSignal?: number;
   openGenerateSignal?: number;
+  onAiUsageUpdate?: (usage: {
+    used: number;
+    limit: number;
+    unlimited: boolean;
+    remaining: number | null;
+  }) => void;
 }) {
   const [steps, setSteps] = useState<PlannerStep[]>([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -646,6 +653,7 @@ export function PlannerView({
         <GeneratePlannerModal
           projectId={projectId}
           currentSteps={steps}
+          onAiUsageUpdate={onAiUsageUpdate}
           onAccept={acceptAiSuggestions}
           onClose={() => setAiModalOpen(false)}
         />
@@ -880,11 +888,18 @@ function StepCard({
 function GeneratePlannerModal({
   projectId,
   currentSteps,
+  onAiUsageUpdate,
   onAccept,
   onClose,
 }: {
   projectId: string;
   currentSteps: PlannerStep[];
+  onAiUsageUpdate?: (usage: {
+    used: number;
+    limit: number;
+    unlimited: boolean;
+    remaining: number | null;
+  }) => void;
   onAccept: (tasks: GeneratedPlannerTask[], deletions: GeneratedDeletionSuggestion[]) => Promise<boolean>;
   onClose: () => void;
 }) {
@@ -966,6 +981,7 @@ function GeneratePlannerModal({
     }
 
     const payload = {
+      projectId,
       goal: goal.trim(),
       additionalInstructions: mode === 'regenerate' ? regenInstructions.trim() : '',
       allowDeletionSuggestions,
@@ -987,15 +1003,26 @@ function GeneratePlannerModal({
     };
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token || '';
+
       const response = await fetch('/api/planner/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(payload),
       });
 
       const json = await response.json();
       if (!response.ok) {
-        setError(json?.error || 'Generation failed.');
+        if (json?.usage && onAiUsageUpdate) onAiUsageUpdate(json.usage);
+        const limitMessage =
+          json?.code === 'AI_USAGE_LIMIT_REACHED'
+            ? `AI usage limit reached (${json?.usage?.used ?? 5}/${json?.usage?.limit ?? 5}).`
+            : null;
+        setError(limitMessage || json?.error || 'Generation failed.');
         return;
       }
 
@@ -1027,6 +1054,7 @@ function GeneratePlannerModal({
 
       setGeneratedTasks(tasks.filter((task) => !!task.title));
       setDeletionSuggestions(deletions);
+      if (json?.usage && onAiUsageUpdate) onAiUsageUpdate(json.usage);
       setLiveBuffer((prev) => [
         ...prev,
         `Done. ${tasks.length} task suggestion(s), ${deletions.length} deletion suggestion(s).`,

@@ -1,4 +1,6 @@
 export const config = { runtime: 'nodejs' };
+import { createClient } from '@supabase/supabase-js';
+import { getSupabaseServiceConfig } from '../_utils/supabaseConfig';
 
 type PlannerInputItem = {
   id?: unknown;
@@ -46,6 +48,13 @@ function safeJsonParse(content: string) {
   }
 }
 
+function readBearerToken(req: any) {
+  const raw = req.headers?.authorization || req.headers?.Authorization || '';
+  const value = String(raw);
+  if (!value.toLowerCase().startsWith('bearer ')) return null;
+  return value.slice(7).trim() || null;
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -57,8 +66,80 @@ export default async function handler(req: any, res: any) {
   }
 
   const goal = asString(req.body?.goal);
+  const projectId = asString(req.body?.projectId);
   if (!goal) {
     return res.status(400).json({ error: 'Goal is required.' });
+  }
+  if (!projectId) {
+    return res.status(400).json({ error: 'Project id is required.' });
+  }
+
+  const cfg = getSupabaseServiceConfig();
+  if (!cfg.ok) {
+    return res.status(503).json({ error: cfg.error, detail: cfg.detail || '' });
+  }
+
+  const accessToken = readBearerToken(req);
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const db = createClient(cfg.url, cfg.serviceKey);
+  const { data: userData, error: userError } = await db.auth.getUser(accessToken);
+  if (userError || !userData.user) {
+    return res.status(401).json({ error: 'Invalid auth session' });
+  }
+
+  const userId = userData.user.id;
+  const { data: profileData } = await db
+    .from('profiles')
+    .select('org_id')
+    .eq('id', userId)
+    .maybeSingle();
+  const userOrgId = (profileData as { org_id?: string | null } | null)?.org_id || null;
+
+  const { data: projectData, error: projectError } = await db
+    .from('projects')
+    .select('id,org_id,user_id')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (projectError || !projectData) {
+    return res.status(404).json({ error: 'Project not found.' });
+  }
+
+  const project = projectData as { id: string; org_id: string | null; user_id: string | null };
+  const hasProjectAccess =
+    project.user_id === userId || (project.org_id && userOrgId && project.org_id === userOrgId);
+  if (!hasProjectAccess) {
+    return res.status(403).json({ error: 'Project access denied.' });
+  }
+
+  const usageLimit = 5;
+  const { data: usageData, error: usageError } = await db.rpc('consume_project_ai_usage', {
+    p_project_id: projectId,
+    p_limit: usageLimit,
+  });
+  if (usageError) {
+    return res.status(500).json({ error: 'Failed to process AI usage limit.' });
+  }
+
+  const usageRow = Array.isArray(usageData) ? usageData[0] : usageData;
+  const usageCount = Number(usageRow?.usage_count || 0);
+  const unlimited = Boolean(usageRow?.unlimited);
+  const allowed = Boolean(usageRow?.allowed);
+  const usageMeta = {
+    used: usageCount,
+    limit: usageLimit,
+    unlimited,
+    remaining: unlimited ? null : Math.max(0, usageLimit - usageCount),
+  };
+
+  if (!allowed) {
+    return res.status(429).json({
+      error: 'AI plan limit reached for this project.',
+      usage: usageMeta,
+      code: 'AI_USAGE_LIMIT_REACHED',
+    });
   }
 
   const additionalInstructions = asString(req.body?.additionalInstructions);
@@ -205,7 +286,7 @@ export default async function handler(req: any, res: any) {
       return res.status(502).json({ error: 'AI returned no usable suggestions.' });
     }
 
-    return res.status(200).json({ tasks, deletions });
+    return res.status(200).json({ tasks, deletions, usage: usageMeta });
   } catch (err: any) {
     console.error('planner/generate runtime crash:', err);
     return res.status(500).json({ error: 'Internal error', detail: String(err?.message || err) });
