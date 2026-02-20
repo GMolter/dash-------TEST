@@ -10,6 +10,25 @@ type PlannerInputItem = {
   completed?: unknown;
 };
 
+function parseBody(raw: any) {
+  if (!raw) return {};
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return {};
+    }
+  }
+  if (typeof Buffer !== 'undefined' && Buffer.isBuffer(raw)) {
+    try {
+      return JSON.parse(raw.toString('utf8'));
+    } catch {
+      return {};
+    }
+  }
+  return raw;
+}
+
 function asString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -48,6 +67,37 @@ function safeJsonParse(content: string) {
   }
 }
 
+function parseStructuredJson(content: string) {
+  const direct = safeJsonParse(content);
+  if (direct) return direct;
+
+  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (!fenced) return null;
+  return safeJsonParse(fenced[1] || '');
+}
+
+function normalizeMessageContent(content: unknown): string | null {
+  if (typeof content === 'string') {
+    const trimmed = content.trim();
+    return trimmed || null;
+  }
+
+  if (!Array.isArray(content)) return null;
+
+  const text = content
+    .map((part) => {
+      if (!part || typeof part !== 'object') return '';
+      const chunk = part as { type?: unknown; text?: unknown };
+      if (chunk.type !== 'text') return '';
+      return asString(chunk.text);
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+
+  return text || null;
+}
+
 function readBearerToken(req: any) {
   const raw = req.headers?.authorization || req.headers?.Authorization || '';
   const value = String(raw);
@@ -63,11 +113,13 @@ export default async function handler(req: any, res: any) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
+      return res.status(503).json({ error: 'Missing OPENAI_API_KEY' });
     }
 
-    const goal = asString(req.body?.goal);
-    const projectId = asString(req.body?.projectId);
+    const body = parseBody(req.body);
+
+    const goal = asString(body?.goal);
+    const projectId = asString(body?.projectId);
     if (!goal) {
       return res.status(400).json({ error: 'Goal is required.' });
     }
@@ -189,10 +241,10 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const additionalInstructions = asString(req.body?.additionalInstructions);
-    const allowDeletionSuggestions = Boolean(req.body?.allowDeletionSuggestions);
-    const plannerTasks = sanitizeContextItems(req.body?.context?.plannerTasks);
-    const boardCards = sanitizeContextItems(req.body?.context?.boardCards);
+    const additionalInstructions = asString(body?.additionalInstructions);
+    const allowDeletionSuggestions = Boolean(body?.allowDeletionSuggestions);
+    const plannerTasks = sanitizeContextItems(body?.context?.plannerTasks);
+    const boardCards = sanitizeContextItems(body?.context?.boardCards);
     const plannerIds = new Set(plannerTasks.map((item) => item.id));
     const boardIds = new Set(boardCards.map((item) => item.id));
 
@@ -297,20 +349,31 @@ export default async function handler(req: any, res: any) {
       clearTimeout(timeoutId);
     }
 
-    const raw = await openaiRes.json();
-    if (!openaiRes.ok) {
+    const openAiRawText = await openaiRes.text();
+    const raw = safeJsonParse(openAiRawText);
+    if (!raw || typeof raw !== 'object') {
       return res.status(502).json({
-        error: 'OpenAI request failed.',
-        detail: raw?.error?.message || raw?.error || 'Unknown OpenAI error',
+        error: 'OpenAI returned a non-JSON response.',
+        detail:
+          typeof openAiRawText === 'string' && openAiRawText.trim()
+            ? openAiRawText.trim().slice(0, 240)
+            : 'Upstream response could not be parsed.',
       });
     }
 
-    const content = raw?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string') {
+    if (!openaiRes.ok) {
+      return res.status(502).json({
+        error: 'OpenAI request failed.',
+        detail: (raw as any)?.error?.message || (raw as any)?.error || 'Unknown OpenAI error',
+      });
+    }
+
+    const content = normalizeMessageContent((raw as any)?.choices?.[0]?.message?.content);
+    if (!content) {
       return res.status(502).json({ error: 'OpenAI response was missing structured output.' });
     }
 
-    const parsed = safeJsonParse(content);
+    const parsed = parseStructuredJson(content);
     if (!parsed || !Array.isArray(parsed.tasks)) {
       return res.status(502).json({ error: 'Failed to parse AI planner output.' });
     }

@@ -1029,11 +1029,15 @@ function GeneratePlannerModal({
           json?.code === 'AI_USAGE_LIMIT_REACHED'
             ? `AI usage limit reached (${json?.usage?.used ?? 5}/${json?.usage?.limit ?? 5}).`
             : null;
+        const serverMessage =
+          json && typeof json === 'object'
+            ? [json?.error, json?.detail].filter((part) => typeof part === 'string' && part.trim()).join(' ')
+            : '';
         const fallback =
           typeof rawText === 'string' && rawText.trim()
             ? rawText.slice(0, 220)
             : `Generation failed (HTTP ${response.status}).`;
-        setError(limitMessage || json?.error || fallback);
+        setError(limitMessage || serverMessage || fallback);
         return;
       }
 
