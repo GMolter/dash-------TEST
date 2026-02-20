@@ -50,6 +50,48 @@ type PlannerBoardColumn = {
   position: number;
 };
 
+function clipText(value: unknown, max: number) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text) return '';
+  return text.length > max ? `${text.slice(0, Math.max(0, max - 3)).trim()}...` : text;
+}
+
+function summarizePlannerContext(items: PlannerStep[], limit: number) {
+  return items
+    .filter((task) => !task.archived)
+    .slice(0, limit)
+    .map((task) => ({
+      id: task.id,
+      title: clipText(task.title, 180),
+      description: clipText(task.description, 700),
+      due_date: task.due_date,
+      completed: task.completed,
+    }))
+    .filter((task) => !!task.id && !!task.title);
+}
+
+function summarizeBoardContext(
+  items: Array<{
+    id: string;
+    title: string;
+    description: string;
+    due_date: string | null;
+    completed: boolean;
+  }>,
+  limit: number,
+) {
+  return items
+    .slice(0, limit)
+    .map((card) => ({
+      id: card.id,
+      title: clipText(card.title, 180),
+      description: clipText(card.description, 700),
+      due_date: card.due_date,
+      completed: card.completed,
+    }))
+    .filter((card) => !!card.id && !!card.title);
+}
+
 export function PlannerView({
   projectId,
   focusNewTaskSignal = 0,
@@ -971,7 +1013,7 @@ function GeneratePlannerModal({
         .eq('project_id', projectId)
         .eq('archived', false)
         .order('position', { ascending: true })
-        .limit(100);
+        .limit(50);
 
       if (boardError) {
         console.error('Error loading board cards for AI context:', boardError);
@@ -980,25 +1022,17 @@ function GeneratePlannerModal({
       }
     }
 
+    const plannerContext = includeExistingTasks ? summarizePlannerContext(currentSteps, 40) : [];
+    const boardContext = includeBoardCards ? summarizeBoardContext(boardCards, 40) : [];
+
     const payload = {
       projectId,
-      goal: goal.trim(),
-      additionalInstructions: mode === 'regenerate' ? regenInstructions.trim() : '',
+      goal: clipText(goal, 1200),
+      additionalInstructions: mode === 'regenerate' ? clipText(regenInstructions, 1200) : '',
       allowDeletionSuggestions,
       context: {
-        plannerTasks: includeExistingTasks
-          ? currentSteps
-              .filter((task) => !task.archived)
-              .slice(0, 100)
-              .map((task) => ({
-                id: task.id,
-                title: task.title,
-                description: task.description,
-                due_date: task.due_date,
-                completed: task.completed,
-              }))
-          : [],
-        boardCards,
+        plannerTasks: plannerContext,
+        boardCards: boardContext,
       },
     };
 
@@ -1033,7 +1067,12 @@ function GeneratePlannerModal({
           json && typeof json === 'object'
             ? [json?.error, json?.detail].filter((part) => typeof part === 'string' && part.trim()).join(' ')
             : '';
+        const platformInvocationFailed =
+          typeof rawText === 'string' && /FUNCTION_INVOCATION_FAILED/i.test(rawText);
         const fallback =
+          platformInvocationFailed
+            ? 'Planner backend invocation failed. Retry generation; if it persists, redeploy with updated planner payload limits.'
+            :
           typeof rawText === 'string' && rawText.trim()
             ? rawText.slice(0, 220)
             : `Generation failed (HTTP ${response.status}).`;

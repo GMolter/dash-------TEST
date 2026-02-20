@@ -210,7 +210,10 @@ export default async function handler(req: any, res: any) {
         .update({ ai_plan_usage_count: nextUsed, updated_at: new Date().toISOString() })
         .eq('id', projectId);
       if (fallbackUpdateError) {
-        return res.status(500).json({ error: 'Failed to process AI usage limit.' });
+        return res.status(503).json({
+          error: 'Failed to process AI usage limit.',
+          detail: String(fallbackUpdateError.message || fallbackUpdateError.code || 'usage update failed'),
+        });
       }
 
       usageMeta = {
@@ -297,7 +300,8 @@ export default async function handler(req: any, res: any) {
   };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 18000);
+    // Keep upstream call under common serverless timeout ceilings to avoid platform-level 500s.
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     let openaiRes: Response;
     try {
       openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -411,6 +415,10 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({ tasks, deletions, usage: usageMeta });
   } catch (err: any) {
     console.error('planner/generate runtime crash:', err);
-    return res.status(500).json({ error: 'Internal error', detail: String(err?.message || err) });
+    return res.status(502).json({
+      error: 'Planner generation failed before completion.',
+      detail: String(err?.message || err),
+      code: 'PLANNER_GENERATION_RUNTIME_ERROR',
+    });
   }
 }
