@@ -1,4 +1,4 @@
-export const config = { runtime: 'nodejs' };
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseServiceConfig } from '../_utils/supabaseConfig';
 
@@ -26,7 +26,7 @@ function normalizeDueDate(value: unknown): string | null {
 function sanitizeContextItems(items: unknown) {
   if (!Array.isArray(items)) return [];
   return items
-    .slice(0, 100)
+    .slice(0, 40)
     .map((item) => {
       const row = (item || {}) as PlannerInputItem;
       return {
@@ -244,45 +244,58 @@ export default async function handler(req: any, res: any) {
     strict: true,
   };
 
-    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-4.1-mini',
-        temperature: 0.4,
-        response_format: {
-          type: 'json_schema',
-          json_schema: schema,
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 18000);
+    let openaiRes: Response;
+    try {
+      openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
         },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a project planning assistant. Return concise, actionable task plans. Respect provided context and avoid duplicating already completed items.',
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0.4,
+          response_format: {
+            type: 'json_schema',
+            json_schema: schema,
           },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              today,
-              goal,
-              additionalInstructions,
-              guidance:
-                'Generate tasks in recommended execution order. Assign dueDate only when timeline evidence exists; otherwise dueDate must be null.',
-              deletionPolicy: allowDeletionSuggestions
-                ? 'You may suggest deletions only for stale/duplicate/obsolete items and only from provided ids.'
-                : 'Do not suggest any deletions. Return deletions as an empty array.',
-              context: {
-                plannerTasks,
-                boardCards,
-              },
-            }),
-          },
-        ],
-      }),
-    });
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a project planning assistant. Return concise, actionable task plans. Respect provided context and avoid duplicating already completed items.',
+            },
+            {
+              role: 'user',
+              content: JSON.stringify({
+                today,
+                goal,
+                additionalInstructions,
+                guidance:
+                  'Generate tasks in recommended execution order. Assign dueDate only when timeline evidence exists; otherwise dueDate must be null.',
+                deletionPolicy: allowDeletionSuggestions
+                  ? 'You may suggest deletions only for stale/duplicate/obsolete items and only from provided ids.'
+                  : 'Do not suggest any deletions. Return deletions as an empty array.',
+                context: {
+                  plannerTasks,
+                  boardCards,
+                },
+              }),
+            },
+          ],
+        }),
+      });
+    } catch (fetchError: any) {
+      if (fetchError?.name === 'AbortError') {
+        return res.status(504).json({ error: 'AI generation timed out. Please try again with less context.' });
+      }
+      throw fetchError;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const raw = await openaiRes.json();
     if (!openaiRes.ok) {
