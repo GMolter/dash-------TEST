@@ -1,4 +1,4 @@
-export const config = { runtime: 'nodejs', maxDuration: 30 };
+export const config = { runtime: 'nodejs', maxDuration: 60 };
 
 type PlannerInputItem = {
   id?: unknown;
@@ -168,7 +168,8 @@ export default async function handler(req: any, res: any) {
     };
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const OPENAI_TIMEOUT_MS = 20000;
+    const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
     let openaiRes: Response;
     try {
       openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
