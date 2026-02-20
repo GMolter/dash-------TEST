@@ -56,101 +56,148 @@ function readBearerToken(req: any) {
 }
 
 export default async function handler(req: any, res: any) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  try {
+    if (req.method !== 'POST') {
+      return res.status(405).json({ error: 'Method not allowed' });
+    }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
-  }
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
+    }
 
-  const goal = asString(req.body?.goal);
-  const projectId = asString(req.body?.projectId);
-  if (!goal) {
-    return res.status(400).json({ error: 'Goal is required.' });
-  }
-  if (!projectId) {
-    return res.status(400).json({ error: 'Project id is required.' });
-  }
+    const goal = asString(req.body?.goal);
+    const projectId = asString(req.body?.projectId);
+    if (!goal) {
+      return res.status(400).json({ error: 'Goal is required.' });
+    }
+    if (!projectId) {
+      return res.status(400).json({ error: 'Project id is required.' });
+    }
 
-  const cfg = getSupabaseServiceConfig();
-  if (!cfg.ok) {
-    return res.status(503).json({ error: cfg.error, detail: cfg.detail || '' });
-  }
+    const cfg = getSupabaseServiceConfig();
+    if (!cfg.ok) {
+      return res.status(503).json({ error: cfg.error, detail: cfg.detail || '' });
+    }
 
-  const accessToken = readBearerToken(req);
-  if (!accessToken) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+    const accessToken = readBearerToken(req);
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
-  const db = createClient(cfg.url, cfg.serviceKey);
-  const { data: userData, error: userError } = await db.auth.getUser(accessToken);
-  if (userError || !userData.user) {
-    return res.status(401).json({ error: 'Invalid auth session' });
-  }
+    const db = createClient(cfg.url, cfg.serviceKey);
+    const { data: userData, error: userError } = await db.auth.getUser(accessToken);
+    if (userError || !userData.user) {
+      return res.status(401).json({ error: 'Invalid auth session' });
+    }
 
-  const userId = userData.user.id;
-  const { data: profileData } = await db
-    .from('profiles')
-    .select('org_id')
-    .eq('id', userId)
-    .maybeSingle();
-  const userOrgId = (profileData as { org_id?: string | null } | null)?.org_id || null;
+    const userId = userData.user.id;
+    const { data: profileData } = await db
+      .from('profiles')
+      .select('org_id')
+      .eq('id', userId)
+      .maybeSingle();
+    const userOrgId = (profileData as { org_id?: string | null } | null)?.org_id || null;
 
-  const { data: projectData, error: projectError } = await db
-    .from('projects')
-    .select('id,org_id,user_id')
-    .eq('id', projectId)
-    .maybeSingle();
-  if (projectError || !projectData) {
-    return res.status(404).json({ error: 'Project not found.' });
-  }
+    const { data: projectData, error: projectError } = await db
+      .from('projects')
+      .select('id,org_id,user_id,ai_plan_usage_count,ai_plan_unlimited')
+      .eq('id', projectId)
+      .maybeSingle();
+    if (projectError || !projectData) {
+      return res.status(404).json({ error: 'Project not found.' });
+    }
 
-  const project = projectData as { id: string; org_id: string | null; user_id: string | null };
-  const hasProjectAccess =
-    project.user_id === userId || (project.org_id && userOrgId && project.org_id === userOrgId);
-  if (!hasProjectAccess) {
-    return res.status(403).json({ error: 'Project access denied.' });
-  }
+    const project = projectData as {
+      id: string;
+      org_id: string | null;
+      user_id: string | null;
+      ai_plan_usage_count?: number | null;
+      ai_plan_unlimited?: boolean | null;
+    };
+    const hasProjectAccess =
+      project.user_id === userId || (project.org_id && userOrgId && project.org_id === userOrgId);
+    if (!hasProjectAccess) {
+      return res.status(403).json({ error: 'Project access denied.' });
+    }
 
-  const usageLimit = 5;
-  const { data: usageData, error: usageError } = await db.rpc('consume_project_ai_usage', {
-    p_project_id: projectId,
-    p_limit: usageLimit,
-  });
-  if (usageError) {
-    return res.status(500).json({ error: 'Failed to process AI usage limit.' });
-  }
+    const usageLimit = 5;
+    let usageMeta = {
+      used: 0,
+      limit: usageLimit,
+      unlimited: false,
+      remaining: usageLimit as number | null,
+    };
 
-  const usageRow = Array.isArray(usageData) ? usageData[0] : usageData;
-  const usageCount = Number(usageRow?.usage_count || 0);
-  const unlimited = Boolean(usageRow?.unlimited);
-  const allowed = Boolean(usageRow?.allowed);
-  const usageMeta = {
-    used: usageCount,
-    limit: usageLimit,
-    unlimited,
-    remaining: unlimited ? null : Math.max(0, usageLimit - usageCount),
-  };
-
-  if (!allowed) {
-    return res.status(429).json({
-      error: 'AI plan limit reached for this project.',
-      usage: usageMeta,
-      code: 'AI_USAGE_LIMIT_REACHED',
+    const { data: usageData, error: usageError } = await db.rpc('consume_project_ai_usage', {
+      p_project_id: projectId,
+      p_limit: usageLimit,
     });
-  }
 
-  const additionalInstructions = asString(req.body?.additionalInstructions);
-  const allowDeletionSuggestions = Boolean(req.body?.allowDeletionSuggestions);
-  const plannerTasks = sanitizeContextItems(req.body?.context?.plannerTasks);
-  const boardCards = sanitizeContextItems(req.body?.context?.boardCards);
-  const plannerIds = new Set(plannerTasks.map((item) => item.id));
-  const boardIds = new Set(boardCards.map((item) => item.id));
+    if (usageError) {
+      // Fallback for environments where the RPC migration has not been applied yet.
+      const currentUsed = Math.max(0, Number(project.ai_plan_usage_count || 0));
+      const currentUnlimited = Boolean(project.ai_plan_unlimited);
+      if (!currentUnlimited && currentUsed >= usageLimit) {
+        usageMeta = {
+          used: currentUsed,
+          limit: usageLimit,
+          unlimited: false,
+          remaining: 0,
+        };
+        return res.status(429).json({
+          error: 'AI plan limit reached for this project.',
+          usage: usageMeta,
+          code: 'AI_USAGE_LIMIT_REACHED',
+        });
+      }
 
-  const today = new Date().toISOString().slice(0, 10);
-  const schema = {
+      const nextUsed = currentUnlimited ? currentUsed : currentUsed + 1;
+      const { error: fallbackUpdateError } = await db
+        .from('projects')
+        .update({ ai_plan_usage_count: nextUsed, updated_at: new Date().toISOString() })
+        .eq('id', projectId);
+      if (fallbackUpdateError) {
+        return res.status(500).json({ error: 'Failed to process AI usage limit.' });
+      }
+
+      usageMeta = {
+        used: nextUsed,
+        limit: usageLimit,
+        unlimited: currentUnlimited,
+        remaining: currentUnlimited ? null : Math.max(0, usageLimit - nextUsed),
+      };
+    } else {
+      const usageRow = Array.isArray(usageData) ? usageData[0] : usageData;
+      const usageCount = Math.max(0, Number(usageRow?.usage_count || 0));
+      const unlimited = Boolean(usageRow?.unlimited);
+      const allowed = Boolean(usageRow?.allowed);
+
+      usageMeta = {
+        used: usageCount,
+        limit: usageLimit,
+        unlimited,
+        remaining: unlimited ? null : Math.max(0, usageLimit - usageCount),
+      };
+
+      if (!allowed) {
+        return res.status(429).json({
+          error: 'AI plan limit reached for this project.',
+          usage: usageMeta,
+          code: 'AI_USAGE_LIMIT_REACHED',
+        });
+      }
+    }
+
+    const additionalInstructions = asString(req.body?.additionalInstructions);
+    const allowDeletionSuggestions = Boolean(req.body?.allowDeletionSuggestions);
+    const plannerTasks = sanitizeContextItems(req.body?.context?.plannerTasks);
+    const boardCards = sanitizeContextItems(req.body?.context?.boardCards);
+    const plannerIds = new Set(plannerTasks.map((item) => item.id));
+    const boardIds = new Set(boardCards.map((item) => item.id));
+
+    const today = new Date().toISOString().slice(0, 10);
+    const schema = {
     name: 'planner_tasks',
     schema: {
       type: 'object',
@@ -197,7 +244,6 @@ export default async function handler(req: any, res: any) {
     strict: true,
   };
 
-  try {
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {

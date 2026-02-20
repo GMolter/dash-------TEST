@@ -1015,14 +1015,30 @@ function GeneratePlannerModal({
         body: JSON.stringify(payload),
       });
 
-      const json = await response.json();
+      const rawText = await response.text();
+      const json = (() => {
+        try {
+          return rawText ? JSON.parse(rawText) : {};
+        } catch {
+          return null;
+        }
+      })();
       if (!response.ok) {
         if (json?.usage && onAiUsageUpdate) onAiUsageUpdate(json.usage);
         const limitMessage =
           json?.code === 'AI_USAGE_LIMIT_REACHED'
             ? `AI usage limit reached (${json?.usage?.used ?? 5}/${json?.usage?.limit ?? 5}).`
             : null;
-        setError(limitMessage || json?.error || 'Generation failed.');
+        const fallback =
+          typeof rawText === 'string' && rawText.trim()
+            ? rawText.slice(0, 220)
+            : `Generation failed (HTTP ${response.status}).`;
+        setError(limitMessage || json?.error || fallback);
+        return;
+      }
+
+      if (!json || typeof json !== 'object') {
+        setError('Generation failed: invalid server response format.');
         return;
       }
 
