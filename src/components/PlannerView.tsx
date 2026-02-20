@@ -18,12 +18,19 @@ type PlannerStep = {
   project_id: string;
   title: string;
   description: string;
+  due_date: string | null;
   completed: boolean;
   position: number;
   archived: boolean;
   ai_generated: boolean;
   created_at: string;
   updated_at: string;
+};
+
+type GeneratedPlannerTask = {
+  title: string;
+  description: string;
+  due_date: string | null;
 };
 
 type PlannerBoardColumn = {
@@ -249,6 +256,7 @@ export function PlannerView({
         title: step.title,
         description: step.description || '',
         priority: 'none',
+        due_date: step.due_date,
         position: nextPosition,
         archived: false,
         completed: step.completed,
@@ -322,6 +330,7 @@ export function PlannerView({
         project_id: projectId,
         title,
         description: newDescription.trim(),
+        due_date: null,
         completed: false,
         archived: false,
         ai_generated: false,
@@ -342,6 +351,31 @@ export function PlannerView({
       setNewDescription('');
       titleRef.current?.focus();
     }
+  }
+
+  async function acceptAiSuggestions(tasks: GeneratedPlannerTask[]) {
+    if (!tasks.length) return false;
+
+    const maxPosition = Math.max(0, ...steps.map((s) => s.position || 0));
+    const payload = tasks.map((task, idx) => ({
+      project_id: projectId,
+      title: task.title,
+      description: task.description || '',
+      due_date: task.due_date ? new Date(task.due_date).toISOString() : null,
+      completed: false,
+      archived: false,
+      ai_generated: true,
+      position: maxPosition + (idx + 1) * 10,
+    }));
+
+    const { data, error } = await supabase.from('project_planner_steps').insert(payload).select('*');
+    if (error) {
+      console.error('Error inserting AI suggestions:', error);
+      return false;
+    }
+
+    setSteps((prev) => [...prev, ...((data as PlannerStep[]) || [])].sort((a, b) => a.position - b.position));
+    return true;
   }
 
   async function reorderSteps(sourceId: string, targetId: string) {
@@ -569,7 +603,12 @@ export function PlannerView({
       </div>
 
       {aiModalOpen && (
-        <GeneratePlannerModal onClose={() => setAiModalOpen(false)} />
+        <GeneratePlannerModal
+          projectId={projectId}
+          currentSteps={steps}
+          onAccept={acceptAiSuggestions}
+          onClose={() => setAiModalOpen(false)}
+        />
       )}
     </div>
   );
@@ -698,6 +737,11 @@ function StepCard({
               </span>
             )}
             {step.archived && <span className="text-xs text-slate-500 italic">Archived</span>}
+            {step.due_date && (
+              <span className="text-xs text-amber-300/90">
+                Due {new Date(step.due_date).toLocaleDateString()}
+              </span>
+            )}
           </div>
 
           {editingTitle ? (
@@ -789,8 +833,120 @@ function StepCard({
   );
 }
 
-function GeneratePlannerModal({ onClose }: { onClose: () => void }) {
+function GeneratePlannerModal({
+  projectId,
+  currentSteps,
+  onAccept,
+  onClose,
+}: {
+  projectId: string;
+  currentSteps: PlannerStep[];
+  onAccept: (tasks: GeneratedPlannerTask[]) => Promise<boolean>;
+  onClose: () => void;
+}) {
   const [goal, setGoal] = useState('');
+  const [regenInstructions, setRegenInstructions] = useState('');
+  const [includeExistingTasks, setIncludeExistingTasks] = useState(true);
+  const [includeBoardCards, setIncludeBoardCards] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [accepting, setAccepting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [generatedTasks, setGeneratedTasks] = useState<GeneratedPlannerTask[]>([]);
+
+  async function generate(mode: 'generate' | 'regenerate') {
+    if (!goal.trim()) {
+      setError('Add a project goal before generating.');
+      return;
+    }
+
+    setWorking(true);
+    setError(null);
+
+    let boardCards: Array<{ title: string; description: string; due_date: string | null; completed: boolean }> = [];
+    if (includeBoardCards) {
+      const { data, error: boardError } = await supabase
+        .from('project_board_cards')
+        .select('title,description,due_date,completed')
+        .eq('project_id', projectId)
+        .eq('archived', false)
+        .order('position', { ascending: true })
+        .limit(50);
+
+      if (boardError) {
+        console.error('Error loading board cards for AI context:', boardError);
+      } else {
+        boardCards = (data as typeof boardCards) || [];
+      }
+    }
+
+    const payload = {
+      goal: goal.trim(),
+      additionalInstructions: mode === 'regenerate' ? regenInstructions.trim() : '',
+      context: {
+        plannerTasks: includeExistingTasks
+          ? currentSteps
+              .filter((task) => !task.archived)
+              .slice(0, 50)
+              .map((task) => ({
+                title: task.title,
+                description: task.description,
+                due_date: task.due_date,
+                completed: task.completed,
+              }))
+          : [],
+        boardCards,
+      },
+    };
+
+    try {
+      const response = await fetch('/api/planner/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await response.json();
+      if (!response.ok) {
+        setError(json?.error || 'Generation failed.');
+        setWorking(false);
+        return;
+      }
+
+      const tasks: GeneratedPlannerTask[] = Array.isArray(json?.tasks)
+        ? json.tasks.map((task: any) => ({
+            title: String(task?.title || '').trim(),
+            description: String(task?.description || '').trim(),
+            due_date:
+              typeof task?.dueDate === 'string' && task.dueDate.trim()
+                ? task.dueDate.trim()
+                : typeof task?.due_date === 'string' && task.due_date.trim()
+                  ? task.due_date.trim()
+                  : null,
+          }))
+        : [];
+
+      setGeneratedTasks(tasks.filter((task) => !!task.title));
+      if (mode === 'regenerate') setRegenInstructions('');
+    } catch (err) {
+      console.error('Failed to generate planner tasks:', err);
+      setError('Unable to reach AI generation endpoint.');
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  async function acceptSuggestions() {
+    if (!generatedTasks.length) return;
+    setAccepting(true);
+    setError(null);
+    const ok = await onAccept(generatedTasks);
+    setAccepting(false);
+    if (!ok) {
+      setError('Could not save generated tasks to your planner.');
+      return;
+    }
+    onClose();
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -800,7 +956,7 @@ function GeneratePlannerModal({ onClose }: { onClose: () => void }) {
           <div>
             <div className="text-xl font-semibold">Generate Plan with AI</div>
             <div className="text-sm text-slate-300 mt-1">
-              Preview modal structure for the AI plan builder workflow.
+              Generate task suggestions with optional due dates, then accept, decline, or regenerate.
             </div>
           </div>
           <button
@@ -824,41 +980,103 @@ function GeneratePlannerModal({ onClose }: { onClose: () => void }) {
 
             <div className="text-sm font-medium text-slate-200 mt-4 mb-2">2) Include sources</div>
             <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
-              <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+              <input
+                type="checkbox"
+                checked={includeExistingTasks}
+                onChange={(e) => setIncludeExistingTasks(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-700 bg-slate-900"
+              />
               Existing planner tasks
             </label>
             <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
-              <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-slate-700 bg-slate-900" />
+              <input
+                type="checkbox"
+                checked={includeBoardCards}
+                onChange={(e) => setIncludeBoardCards(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-700 bg-slate-900"
+              />
               Board cards
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" className="h-4 w-4 rounded border-slate-700 bg-slate-900" />
-              Files and docs (future)
-            </label>
+            <button
+              onClick={() => void generate('generate')}
+              disabled={working || !goal.trim()}
+              className={`mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm ${
+                !working && goal.trim()
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              {working ? 'Generating...' : generatedTasks.length ? 'Generate Again' : 'Generate Suggestions'}
+            </button>
           </div>
 
           <div className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
             <div className="text-sm font-medium text-slate-200 mb-3">3) Preview output</div>
-            <div className="space-y-2">
-              <div className="rounded-xl border border-blue-500/25 bg-blue-500/8 p-3">
-                <div className="text-sm font-medium text-blue-200">Draft kickoff checklist</div>
-                <div className="text-xs text-blue-200/70 mt-1">Dependencies, scope, owners</div>
+            {generatedTasks.length === 0 ? (
+              <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 p-4 text-sm text-slate-400">
+                Suggestions will appear here after generation.
               </div>
-              <div className="rounded-xl border border-slate-700/70 bg-slate-900/40 p-3">
-                <div className="text-sm font-medium text-slate-200">Build first implementation</div>
-                <div className="text-xs text-slate-400 mt-1">Milestone estimate + acceptance criteria</div>
+            ) : (
+              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                {generatedTasks.map((task, idx) => (
+                  <div
+                    key={`${task.title}-${idx}`}
+                    className={`rounded-xl border p-3 ${
+                      idx === 0
+                        ? 'border-blue-500/25 bg-blue-500/8'
+                        : 'border-slate-700/70 bg-slate-900/40'
+                    }`}
+                  >
+                    <div className={`text-sm font-medium ${idx === 0 ? 'text-blue-200' : 'text-slate-200'}`}>
+                      {task.title}
+                    </div>
+                    {task.description && (
+                      <div className={`text-xs mt-1 ${idx === 0 ? 'text-blue-200/70' : 'text-slate-400'}`}>
+                        {task.description}
+                      </div>
+                    )}
+                    {task.due_date && (
+                      <div className="text-xs mt-2 text-amber-300/85">Due {task.due_date}</div>
+                    )}
+                  </div>
+                ))}
               </div>
-              <div className="rounded-xl border border-slate-700/70 bg-slate-900/40 p-3">
-                <div className="text-sm font-medium text-slate-200">QA and launch prep</div>
-                <div className="text-xs text-slate-400 mt-1">Testing pass, edge cases, release notes</div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-          Preview only: this modal is a UI structure for the upcoming AI planning flow.
-        </div>
+        {generatedTasks.length > 0 && (
+          <div className="mt-5 rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
+            <div className="text-sm font-medium text-slate-200 mb-2">Regenerate with extra context</div>
+            <textarea
+              value={regenInstructions}
+              onChange={(e) => setRegenInstructions(e.target.value)}
+              placeholder="Example: prioritize launch blockers first and avoid assigning due dates before March."
+              rows={3}
+              className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
+            />
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={() => void generate('regenerate')}
+                disabled={working || !goal.trim()}
+                className={`px-4 py-2.5 rounded-xl text-sm ${
+                  !working && goal.trim()
+                    ? 'border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 text-blue-200'
+                    : 'border border-slate-700 bg-slate-700 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                {working ? 'Regenerating...' : 'Regenerate'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
+            {error}
+          </div>
+        )}
 
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
           <button
@@ -867,13 +1085,25 @@ function GeneratePlannerModal({ onClose }: { onClose: () => void }) {
           >
             Close
           </button>
-          <button
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white"
-            title="Demo only"
-          >
-            <Sparkles className="w-4 h-4" />
-            Generate Example Plan
-          </button>
+          {generatedTasks.length > 0 && (
+            <>
+              <button
+                onClick={() => setGeneratedTasks([])}
+                disabled={working || accepting}
+                className="px-4 py-2.5 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Decline Suggestions
+              </button>
+              <button
+                onClick={() => void acceptSuggestions()}
+                disabled={working || accepting}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Sparkles className="w-4 h-4" />
+                {accepting ? 'Adding Tasks...' : 'Accept Suggestions'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
