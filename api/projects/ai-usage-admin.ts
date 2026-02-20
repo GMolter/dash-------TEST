@@ -82,8 +82,11 @@ export default async function handler(req: any, res: any) {
   try {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-    const configuredAdminPassword = process.env.ADMIN_PASSWORD || '';
-    if (!configuredAdminPassword) return res.status(503).json({ error: 'Missing ADMIN_PASSWORD' });
+    const configuredAdminPasswordRaw = process.env.ADMIN_PASSWORD || process.env.ADMIN_COOKIE_SECRET || '';
+    const configuredAdminPasswordClean = stripWrappingQuotes(configuredAdminPasswordRaw);
+    if (!configuredAdminPasswordRaw) {
+      return res.status(503).json({ error: 'Missing ADMIN_PASSWORD or ADMIN_COOKIE_SECRET' });
+    }
 
     const body = parseBody(req.body);
     const projectId = asString(body?.projectId);
@@ -93,7 +96,9 @@ export default async function handler(req: any, res: any) {
 
     if (!projectId) return res.status(400).json({ error: 'Missing projectId' });
     if (!password) return res.status(400).json({ error: 'Missing password' });
-    if (password !== configuredAdminPassword) return res.status(401).json({ error: 'Invalid password' });
+    if (password !== configuredAdminPasswordRaw && password !== configuredAdminPasswordClean) {
+      return res.status(401).json({ error: 'Invalid password' });
+    }
 
     const usageCount =
       typeof usageCountRaw === 'number' && Number.isFinite(usageCountRaw)
