@@ -51,6 +51,7 @@ export function PlannerView({
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [selectedStepIds, setSelectedStepIds] = useState<string[]>([]);
   const [lastSelectedStepId, setLastSelectedStepId] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
   const [bulkWorking, setBulkWorking] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const [showDescriptionInput, setShowDescriptionInput] = useState(false);
@@ -130,6 +131,17 @@ export function PlannerView({
   }
 
   function handleStepRowClick(stepId: string, e: React.MouseEvent) {
+    if (selectionMode) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        selectRange(stepId);
+        setLastSelectedStepId(stepId);
+        return;
+      }
+      toggleSingleSelection(stepId);
+      return;
+    }
+
     if (!(e.ctrlKey || e.metaKey || e.shiftKey)) return;
     e.preventDefault();
 
@@ -383,6 +395,22 @@ export function PlannerView({
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => {
+              setSelectionMode((prev) => {
+                const next = !prev;
+                if (!next) clearSelection();
+                return next;
+              });
+            }}
+            className={`px-3 py-2 rounded-2xl border text-sm transition-colors ${
+              selectionMode
+                ? 'bg-blue-500/20 border-blue-500/35 text-blue-200'
+                : 'bg-slate-900/30 border-slate-800/70 text-slate-300 hover:bg-slate-900/45'
+            }`}
+          >
+            {selectionMode ? 'Done Selecting' : 'Select Tasks'}
+          </button>
+          <button
             onClick={() => setAiModalOpen(true)}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-200 text-sm transition-colors"
           >
@@ -450,7 +478,7 @@ export function PlannerView({
         </button>
       </div>
 
-      {selectedStepIds.length > 0 && (
+      {selectionMode && selectedStepIds.length > 0 && (
         <div className="mt-4 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-3 sm:p-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="text-sm text-blue-100">
@@ -494,6 +522,12 @@ export function PlannerView({
         </div>
       )}
 
+      {selectionMode && selectedStepIds.length === 0 && (
+        <div className="mt-4 rounded-2xl border border-slate-800/60 bg-slate-950/40 p-3 text-xs text-slate-400">
+          Selection mode is on. Click tasks to select, or Shift-click to select a range.
+        </div>
+      )}
+
       <div className="mt-6 space-y-3">
         {filteredSteps.length === 0 ? (
           <div className="rounded-2xl border border-slate-800/60 bg-slate-950/45 p-6 text-slate-400">
@@ -505,6 +539,7 @@ export function PlannerView({
               key={step.id}
               step={step}
               index={index}
+              selectionMode={selectionMode}
               selected={selectedStepIds.includes(step.id)}
               isDragOver={dragOverId === step.id}
               onDragStart={(id) => setDraggingId(id)}
@@ -543,6 +578,7 @@ export function PlannerView({
 function StepCard({
   step,
   index,
+  selectionMode,
   selected,
   isDragOver,
   onDragStart,
@@ -558,6 +594,7 @@ function StepCard({
 }: {
   step: PlannerStep;
   index: number;
+  selectionMode: boolean;
   selected: boolean;
   isDragOver: boolean;
   onDragStart: (id: string) => void;
@@ -637,17 +674,19 @@ function StepCard({
           )}
         </button>
 
-        <input
-          type="checkbox"
-          checked={selected}
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleSelected(step.id, e.shiftKey ? 'range' : 'toggle');
-          }}
-          onChange={() => {}}
-          className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
-          title="Select task (use Shift/Ctrl for multi-select)"
-        />
+        {selectionMode && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelected(step.id, e.shiftKey ? 'range' : 'toggle');
+            }}
+            onChange={() => {}}
+            className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
+            title="Select task (use Shift/Ctrl for multi-select)"
+          />
+        )}
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -680,6 +719,11 @@ function StepCard({
           ) : (
             <div
               onClick={(e) => {
+                if (selectionMode) {
+                  e.stopPropagation();
+                  onRowClick(step.id, e);
+                  return;
+                }
                 if (e.shiftKey || e.ctrlKey || e.metaKey) return;
                 setEditingTitle(true);
               }}

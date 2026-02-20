@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, MoreVertical, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type BoardColumn = {
@@ -27,6 +27,11 @@ type BoardCard = {
   created_at: string;
   updated_at: string;
 };
+
+function isCompletedLaneName(columnName: string) {
+  const v = (columnName || '').trim().toLowerCase();
+  return v.includes('done') || v.includes('complete');
+}
 
 export function BoardView({ projectId }: { projectId: string }) {
   const [columns, setColumns] = useState<BoardColumn[]>([]);
@@ -149,19 +154,31 @@ export function BoardView({ projectId }: { projectId: string }) {
 
   async function moveCard(cardId: string, newColumnId: string) {
     const newPosition = await getNextCardPosition(newColumnId);
+    const targetColumn = columns.find((c) => c.id === newColumnId);
+    const shouldMarkCompleted = !!targetColumn && isCompletedLaneName(targetColumn.name);
+
+    const updates: Partial<BoardCard> & { updated_at: string } = {
+      column_id: newColumnId,
+      position: newPosition,
+      updated_at: new Date().toISOString(),
+      ...(shouldMarkCompleted ? { completed: true } : {}),
+    };
 
     await supabase
       .from('project_board_cards')
-      .update({
-        column_id: newColumnId,
-        position: newPosition,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updates)
       .eq('id', cardId);
 
     setCards((prev) =>
       prev.map((c) =>
-        c.id === cardId ? { ...c, column_id: newColumnId, position: newPosition } : c
+        c.id === cardId
+          ? {
+              ...c,
+              column_id: newColumnId,
+              position: newPosition,
+              completed: shouldMarkCompleted ? true : c.completed,
+            }
+          : c
       )
     );
   }
@@ -344,6 +361,7 @@ function BoardColumnView({
           <CardItem
             key={card.id}
             card={card}
+            completedViaLane={isCompletedLaneName(column.name)}
             onDragStart={() => onDragStart(card.id)}
             onClick={() => onCardClick(card)}
           />
@@ -392,10 +410,12 @@ function BoardColumnView({
 
 function CardItem({
   card,
+  completedViaLane,
   onDragStart,
   onClick,
 }: {
   card: BoardCard;
+  completedViaLane: boolean;
   onDragStart: () => void;
   onClick: () => void;
 }) {
@@ -412,6 +432,8 @@ function CardItem({
     high: 'bg-red-500/15 text-red-300 border-red-500/25',
   };
 
+  const isCompleted = card.completed || completedViaLane;
+
   return (
     <div
       draggable
@@ -420,11 +442,15 @@ function CardItem({
         onDragStart();
       }}
       onClick={onClick}
-      className={`rounded-xl border ${priorityColors[card.priority]} bg-slate-900/30 p-3 cursor-pointer hover:bg-slate-900/50 transition-colors`}
+      className={`rounded-xl border ${
+        isCompleted ? 'border-emerald-400/35 bg-emerald-500/10' : `${priorityColors[card.priority]} bg-slate-900/30`
+      } p-3 cursor-pointer hover:bg-slate-900/50 transition-colors`}
     >
       <div className="text-sm font-medium text-slate-100 mb-2">{card.title}</div>
 
       <div className="flex items-center gap-2 flex-wrap">
+        {isCompleted && <span className="text-xs font-medium text-emerald-300">Completed</span>}
+
         {card.priority !== 'none' && (
           <span className={`px-2 py-0.5 rounded-full border text-xs ${priorityBadges[card.priority]}`}>
             {card.priority}
@@ -464,6 +490,9 @@ function CardModal({
   const [dueDate, setDueDate] = useState(card.due_date || '');
   const [assignee, setAssignee] = useState(card.assignee_name || '');
   const [completed, setCompleted] = useState(card.completed);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function saveChanges() {
     const updates = {
@@ -476,12 +505,22 @@ function CardModal({
       updated_at: new Date().toISOString(),
     };
 
-    await supabase
+    setSaving(true);
+    setSaveError(null);
+    const { error } = await supabase
       .from('project_board_cards')
       .update(updates)
       .eq('id', card.id);
 
+    setSaving(false);
+    if (error) {
+      console.error('Error saving card:', error);
+      setSaveError('Could not save card changes.');
+      return;
+    }
+
     onUpdate(updates);
+    setDirty(false);
   }
 
   async function handleDelete() {
@@ -499,8 +538,10 @@ function CardModal({
             <input
               type="text"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={saveChanges}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                setDirty(true);
+              }}
               className="w-full text-xl font-semibold bg-transparent text-slate-100 focus:outline-none"
             />
           </div>
@@ -514,8 +555,10 @@ function CardModal({
             <label className="block text-sm text-slate-400 mb-2">Description</label>
             <textarea
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              onBlur={saveChanges}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                setDirty(true);
+              }}
               placeholder="Add details..."
               className="w-full h-32 rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-3 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
             />
@@ -528,7 +571,7 @@ function CardModal({
                 value={priority}
                 onChange={(e) => {
                   setPriority(e.target.value as any);
-                  setTimeout(saveChanges, 100);
+                  setDirty(true);
                 }}
                 className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
               >
@@ -544,8 +587,10 @@ function CardModal({
               <input
                 type="date"
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                onBlur={saveChanges}
+                onChange={(e) => {
+                  setDueDate(e.target.value);
+                  setDirty(true);
+                }}
                 className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
               />
             </div>
@@ -556,8 +601,10 @@ function CardModal({
             <input
               type="text"
               value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
-              onBlur={saveChanges}
+              onChange={(e) => {
+                setAssignee(e.target.value);
+                setDirty(true);
+              }}
               placeholder="Assignee name (optional)"
               className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
             />
@@ -570,7 +617,7 @@ function CardModal({
               checked={completed}
               onChange={(e) => {
                 setCompleted(e.target.checked);
-                setTimeout(saveChanges, 100);
+                setDirty(true);
               }}
               className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500/35"
             />
@@ -586,13 +633,27 @@ function CardModal({
             >
               Delete Card
             </button>
-            <button
-              onClick={onClose}
-              className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm transition-colors"
-            >
-              Close
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void saveChanges()}
+                disabled={saving || !dirty}
+                className={`px-6 py-2 rounded-xl text-white text-sm transition-colors ${
+                  saving || !dirty
+                    ? 'bg-slate-700 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {saving ? 'Saving...' : dirty ? 'Save Changes' : 'Saved'}
+              </button>
+              <button
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl border border-slate-700/70 hover:bg-slate-900/45 text-slate-300 text-sm transition-colors"
+              >
+                Close
+              </button>
+            </div>
           </div>
+          {saveError && <div className="text-xs text-red-300">{saveError}</div>}
         </div>
       </div>
     </div>
