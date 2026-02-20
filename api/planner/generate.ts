@@ -1,6 +1,7 @@
 export const config = { runtime: 'nodejs' };
 
 type PlannerInputItem = {
+  id?: unknown;
   title?: unknown;
   description?: unknown;
   due_date?: unknown;
@@ -23,17 +24,18 @@ function normalizeDueDate(value: unknown): string | null {
 function sanitizeContextItems(items: unknown) {
   if (!Array.isArray(items)) return [];
   return items
-    .slice(0, 50)
+    .slice(0, 100)
     .map((item) => {
       const row = (item || {}) as PlannerInputItem;
       return {
+        id: asString(row.id),
         title: asString(row.title),
         description: asString(row.description),
         due_date: normalizeDueDate(row.due_date),
         completed: Boolean(row.completed),
       };
     })
-    .filter((item) => item.title);
+    .filter((item) => item.id && item.title);
 }
 
 function safeJsonParse(content: string) {
@@ -60,8 +62,11 @@ export default async function handler(req: any, res: any) {
   }
 
   const additionalInstructions = asString(req.body?.additionalInstructions);
+  const allowDeletionSuggestions = Boolean(req.body?.allowDeletionSuggestions);
   const plannerTasks = sanitizeContextItems(req.body?.context?.plannerTasks);
   const boardCards = sanitizeContextItems(req.body?.context?.boardCards);
+  const plannerIds = new Set(plannerTasks.map((item) => item.id));
+  const boardIds = new Set(boardCards.map((item) => item.id));
 
   const today = new Date().toISOString().slice(0, 10);
   const schema = {
@@ -72,7 +77,7 @@ export default async function handler(req: any, res: any) {
       properties: {
         tasks: {
           type: 'array',
-          minItems: 1,
+          minItems: 0,
           maxItems: 15,
           items: {
             type: 'object',
@@ -90,8 +95,23 @@ export default async function handler(req: any, res: any) {
             required: ['title', 'description', 'dueDate'],
           },
         },
+        deletions: {
+          type: 'array',
+          maxItems: 20,
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              source: { type: 'string', enum: ['planner', 'board'] },
+              id: { type: 'string' },
+              title: { type: 'string' },
+              reason: { type: 'string' },
+            },
+            required: ['source', 'id', 'title', 'reason'],
+          },
+        },
       },
-      required: ['tasks'],
+      required: ['tasks', 'deletions'],
     },
     strict: true,
   };
@@ -124,6 +144,9 @@ export default async function handler(req: any, res: any) {
               additionalInstructions,
               guidance:
                 'Generate tasks in recommended execution order. Assign dueDate only when timeline evidence exists; otherwise dueDate must be null.',
+              deletionPolicy: allowDeletionSuggestions
+                ? 'You may suggest deletions only for stale/duplicate/obsolete items and only from provided ids.'
+                : 'Do not suggest any deletions. Return deletions as an empty array.',
               context: {
                 plannerTasks,
                 boardCards,
@@ -161,11 +184,28 @@ export default async function handler(req: any, res: any) {
       .filter((task: any) => task.title)
       .slice(0, 15);
 
-    if (!tasks.length) {
-      return res.status(502).json({ error: 'AI returned no usable tasks.' });
+    const deletions = Array.isArray(parsed.deletions)
+      ? parsed.deletions
+          .map((item: any) => ({
+            source: item?.source === 'board' ? 'board' : 'planner',
+            id: asString(item?.id),
+            title: asString(item?.title),
+            reason: asString(item?.reason),
+          }))
+          .filter((item: any) => {
+            if (!allowDeletionSuggestions) return false;
+            if (!item.id) return false;
+            if (item.source === 'planner') return plannerIds.has(item.id);
+            return boardIds.has(item.id);
+          })
+          .slice(0, 20)
+      : [];
+
+    if (!tasks.length && !deletions.length) {
+      return res.status(502).json({ error: 'AI returned no usable suggestions.' });
     }
 
-    return res.status(200).json({ tasks });
+    return res.status(200).json({ tasks, deletions });
   } catch (err: any) {
     console.error('planner/generate runtime crash:', err);
     return res.status(500).json({ error: 'Internal error', detail: String(err?.message || err) });

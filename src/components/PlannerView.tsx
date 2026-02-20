@@ -3,12 +3,15 @@ import {
   CheckCircle2,
   Circle,
   Sparkles,
+  Check,
   Archive,
   MoreVertical,
   GripVertical,
   Plus,
   Columns3,
   Trash2,
+  Loader2,
+  ChevronRight,
   X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -31,6 +34,13 @@ type GeneratedPlannerTask = {
   title: string;
   description: string;
   due_date: string | null;
+};
+
+type GeneratedDeletionSuggestion = {
+  source: 'planner' | 'board';
+  id: string;
+  title: string;
+  reason: string;
 };
 
 type PlannerBoardColumn = {
@@ -353,28 +363,57 @@ export function PlannerView({
     }
   }
 
-  async function acceptAiSuggestions(tasks: GeneratedPlannerTask[]) {
-    if (!tasks.length) return false;
+  async function acceptAiSuggestions(
+    tasks: GeneratedPlannerTask[],
+    deletions: GeneratedDeletionSuggestion[],
+  ) {
+    const plannerDeleteIds = deletions.filter((d) => d.source === 'planner').map((d) => d.id);
+    const boardDeleteIds = deletions.filter((d) => d.source === 'board').map((d) => d.id);
+    const shouldInsert = tasks.length > 0;
 
-    const maxPosition = Math.max(0, ...steps.map((s) => s.position || 0));
-    const payload = tasks.map((task, idx) => ({
-      project_id: projectId,
-      title: task.title,
-      description: task.description || '',
-      due_date: task.due_date ? new Date(task.due_date).toISOString() : null,
-      completed: false,
-      archived: false,
-      ai_generated: true,
-      position: maxPosition + (idx + 1) * 10,
-    }));
+    if (!shouldInsert && !plannerDeleteIds.length && !boardDeleteIds.length) return false;
 
-    const { data, error } = await supabase.from('project_planner_steps').insert(payload).select('*');
-    if (error) {
-      console.error('Error inserting AI suggestions:', error);
-      return false;
+    let insertedSteps: PlannerStep[] = [];
+    if (shouldInsert) {
+      const maxPosition = Math.max(0, ...steps.map((s) => s.position || 0));
+      const payload = tasks.map((task, idx) => ({
+        project_id: projectId,
+        title: task.title,
+        description: task.description || '',
+        due_date: task.due_date ? new Date(task.due_date).toISOString() : null,
+        completed: false,
+        archived: false,
+        ai_generated: true,
+        position: maxPosition + (idx + 1) * 10,
+      }));
+
+      const { data, error } = await supabase.from('project_planner_steps').insert(payload).select('*');
+      if (error) {
+        console.error('Error inserting AI suggestions:', error);
+        return false;
+      }
+      insertedSteps = (data as PlannerStep[]) || [];
     }
 
-    setSteps((prev) => [...prev, ...((data as PlannerStep[]) || [])].sort((a, b) => a.position - b.position));
+    if (plannerDeleteIds.length) {
+      const { error } = await supabase.from('project_planner_steps').delete().in('id', plannerDeleteIds);
+      if (error) {
+        console.error('Error deleting planner steps from AI suggestions:', error);
+        return false;
+      }
+    }
+
+    if (boardDeleteIds.length) {
+      const { error } = await supabase.from('project_board_cards').delete().in('id', boardDeleteIds);
+      if (error) {
+        console.error('Error deleting board cards from AI suggestions:', error);
+        return false;
+      }
+    }
+
+    setSteps((prev) =>
+      [...prev.filter((s) => !plannerDeleteIds.includes(s.id)), ...insertedSteps].sort((a, b) => a.position - b.position),
+    );
     return true;
   }
 
@@ -714,17 +753,21 @@ function StepCard({
         </button>
 
         {selectionMode && (
-          <input
-            type="checkbox"
-            checked={selected}
+          <button
             onClick={(e) => {
               e.stopPropagation();
               onToggleSelected(step.id, e.shiftKey ? 'range' : 'toggle');
             }}
-            onChange={() => {}}
-            className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
+            className={`mt-1 h-5 w-5 rounded-md border transition-colors flex items-center justify-center ${
+              selected
+                ? 'border-blue-400/80 bg-blue-500/25 text-blue-100'
+                : 'border-slate-700/80 bg-slate-900/70 text-transparent hover:border-slate-500/80'
+            }`}
             title="Select task (use Shift/Ctrl for multi-select)"
-          />
+            type="button"
+          >
+            <Check className="w-3.5 h-3.5" />
+          </button>
         )}
 
         <div className="flex-1 min-w-0">
@@ -841,17 +884,22 @@ function GeneratePlannerModal({
 }: {
   projectId: string;
   currentSteps: PlannerStep[];
-  onAccept: (tasks: GeneratedPlannerTask[]) => Promise<boolean>;
+  onAccept: (tasks: GeneratedPlannerTask[], deletions: GeneratedDeletionSuggestion[]) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [goal, setGoal] = useState('');
   const [regenInstructions, setRegenInstructions] = useState('');
   const [includeExistingTasks, setIncludeExistingTasks] = useState(true);
   const [includeBoardCards, setIncludeBoardCards] = useState(true);
+  const [allowDeletionSuggestions, setAllowDeletionSuggestions] = useState(false);
   const [working, setWorking] = useState(false);
   const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatedTasks, setGeneratedTasks] = useState<GeneratedPlannerTask[]>([]);
+  const [deletionSuggestions, setDeletionSuggestions] = useState<
+    Array<GeneratedDeletionSuggestion & { selected: boolean }>
+  >([]);
+  const [liveBuffer, setLiveBuffer] = useState<string[]>([]);
 
   async function generate(mode: 'generate' | 'regenerate') {
     if (!goal.trim()) {
@@ -861,16 +909,42 @@ function GeneratePlannerModal({
 
     setWorking(true);
     setError(null);
+    setLiveBuffer(['Preparing project context...']);
 
-    let boardCards: Array<{ title: string; description: string; due_date: string | null; completed: boolean }> = [];
+    const stagedBuffer = [
+      'Collecting active planner tasks...',
+      'Collecting board cards...',
+      'Drafting ordered tasks with due dates...',
+      allowDeletionSuggestions ? 'Evaluating stale tasks/cards for cleanup...' : 'Skipping cleanup analysis...',
+      'Finalizing suggestions...',
+    ];
+    let bufferIdx = 0;
+    const timer = window.setInterval(() => {
+      setLiveBuffer((prev) => {
+        if (bufferIdx < stagedBuffer.length) {
+          const next = [...prev, stagedBuffer[bufferIdx]];
+          bufferIdx += 1;
+          return next;
+        }
+        return [...prev.slice(-5), 'Waiting for AI response...'];
+      });
+    }, 850);
+
+    let boardCards: Array<{
+      id: string;
+      title: string;
+      description: string;
+      due_date: string | null;
+      completed: boolean;
+    }> = [];
     if (includeBoardCards) {
       const { data, error: boardError } = await supabase
         .from('project_board_cards')
-        .select('title,description,due_date,completed')
+        .select('id,title,description,due_date,completed')
         .eq('project_id', projectId)
         .eq('archived', false)
         .order('position', { ascending: true })
-        .limit(50);
+        .limit(100);
 
       if (boardError) {
         console.error('Error loading board cards for AI context:', boardError);
@@ -882,12 +956,14 @@ function GeneratePlannerModal({
     const payload = {
       goal: goal.trim(),
       additionalInstructions: mode === 'regenerate' ? regenInstructions.trim() : '',
+      allowDeletionSuggestions,
       context: {
         plannerTasks: includeExistingTasks
           ? currentSteps
               .filter((task) => !task.archived)
-              .slice(0, 50)
+              .slice(0, 100)
               .map((task) => ({
+                id: task.id,
                 title: task.title,
                 description: task.description,
                 due_date: task.due_date,
@@ -908,7 +984,6 @@ function GeneratePlannerModal({
       const json = await response.json();
       if (!response.ok) {
         setError(json?.error || 'Generation failed.');
-        setWorking(false);
         return;
       }
 
@@ -925,38 +1000,66 @@ function GeneratePlannerModal({
           }))
         : [];
 
+      const deletions: Array<GeneratedDeletionSuggestion & { selected: boolean }> =
+        allowDeletionSuggestions && Array.isArray(json?.deletions)
+          ? json.deletions
+              .map((item: any) => ({
+                source: item?.source === 'board' ? 'board' : 'planner',
+                id: String(item?.id || '').trim(),
+                title: String(item?.title || '').trim(),
+                reason: String(item?.reason || '').trim(),
+                selected: true,
+              }))
+              .filter((item) => !!item.id)
+          : [];
+
       setGeneratedTasks(tasks.filter((task) => !!task.title));
+      setDeletionSuggestions(deletions);
+      setLiveBuffer((prev) => [
+        ...prev,
+        `Done. ${tasks.length} task suggestion(s), ${deletions.length} deletion suggestion(s).`,
+      ]);
       if (mode === 'regenerate') setRegenInstructions('');
     } catch (err) {
       console.error('Failed to generate planner tasks:', err);
       setError('Unable to reach AI generation endpoint.');
     } finally {
+      window.clearInterval(timer);
       setWorking(false);
     }
   }
 
   async function acceptSuggestions() {
-    if (!generatedTasks.length) return;
+    const selectedDeletions = deletionSuggestions
+      .filter((item) => item.selected)
+      .map(({ selected: _selected, ...item }) => item);
+    if (!generatedTasks.length && !selectedDeletions.length) {
+      setError('No selected suggestions to apply.');
+      return;
+    }
+
     setAccepting(true);
     setError(null);
-    const ok = await onAccept(generatedTasks);
+    const ok = await onAccept(generatedTasks, selectedDeletions);
     setAccepting(false);
     if (!ok) {
-      setError('Could not save generated tasks to your planner.');
+      setError('Could not apply AI suggestions to your project.');
       return;
     }
     onClose();
   }
 
+  const hasSuggestions = generatedTasks.length > 0 || deletionSuggestions.length > 0;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm">
       <button className="absolute inset-0" onClick={onClose} aria-label="Close" />
-      <div className="relative w-full max-w-3xl rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl p-5 sm:p-6 max-h-[92vh] overflow-y-auto">
+      <div className="relative w-full max-w-6xl rounded-3xl border border-slate-800/60 bg-slate-950/95 backdrop-blur shadow-2xl p-5 sm:p-6 max-h-[92vh] overflow-hidden flex flex-col">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-xl font-semibold">Generate Plan with AI</div>
             <div className="text-sm text-slate-300 mt-1">
-              Generate task suggestions with optional due dates, then accept, decline, or regenerate.
+              Generate tasks, review due dates, and optionally apply AI-suggested cleanup.
             </div>
           </div>
           <button
@@ -967,128 +1070,182 @@ function GeneratePlannerModal({
           </button>
         </div>
 
-        <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
-            <div className="text-sm font-medium text-slate-200 mb-2">1) Project goal</div>
-            <textarea
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              placeholder="What do you want done? (example: ship MVP by end of month)"
-              rows={4}
-              className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
-            />
+        <div className="mt-5 flex-1 overflow-y-auto pr-1 scrollbar-theme">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
+              <div className="text-sm font-medium text-slate-200 mb-2">1) Project goal</div>
+              <textarea
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                placeholder="What do you want done? (example: ship MVP by end of month)"
+                rows={4}
+                className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
+              />
 
-            <div className="text-sm font-medium text-slate-200 mt-4 mb-2">2) Include sources</div>
-            <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
-              <input
-                type="checkbox"
-                checked={includeExistingTasks}
-                onChange={(e) => setIncludeExistingTasks(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-700 bg-slate-900"
-              />
-              Existing planner tasks
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300 mb-2">
-              <input
-                type="checkbox"
-                checked={includeBoardCards}
-                onChange={(e) => setIncludeBoardCards(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-700 bg-slate-900"
-              />
-              Board cards
-            </label>
-            <button
-              onClick={() => void generate('generate')}
-              disabled={working || !goal.trim()}
-              className={`mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm ${
-                !working && goal.trim()
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                  : 'bg-slate-700 text-slate-400 cursor-not-allowed'
-              }`}
-            >
-              <Sparkles className="w-4 h-4" />
-              {working ? 'Generating...' : generatedTasks.length ? 'Generate Again' : 'Generate Suggestions'}
-            </button>
+              <div className="text-sm font-medium text-slate-200 mt-4 mb-2">2) Include context</div>
+              <div className="space-y-2">
+                <ToggleOption
+                  checked={includeExistingTasks}
+                  onClick={() => setIncludeExistingTasks((v) => !v)}
+                  label="Existing planner tasks"
+                />
+                <ToggleOption
+                  checked={includeBoardCards}
+                  onClick={() => setIncludeBoardCards((v) => !v)}
+                  label="Board cards"
+                />
+                <ToggleOption
+                  checked={allowDeletionSuggestions}
+                  onClick={() => setAllowDeletionSuggestions((v) => !v)}
+                  label="Allow AI deletion suggestions"
+                />
+              </div>
+
+              <button
+                onClick={() => void generate('generate')}
+                disabled={working || !goal.trim()}
+                className={`mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm ${
+                  !working && goal.trim()
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                }`}
+              >
+                {working ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {working ? 'Generating...' : hasSuggestions ? 'Generate Again' : 'Generate Suggestions'}
+              </button>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
+              <div className="text-sm font-medium text-slate-200 mb-3">3) Suggested tasks</div>
+              {generatedTasks.length === 0 ? (
+                <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 p-4 text-sm text-slate-400">
+                  Suggestions will appear here after generation.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {generatedTasks.map((task, idx) => (
+                    <div
+                      key={`${task.title}-${idx}`}
+                      className={`rounded-xl border p-3 ${
+                        idx === 0 ? 'border-blue-500/25 bg-blue-500/8' : 'border-slate-700/70 bg-slate-900/40'
+                      }`}
+                    >
+                      <div className={`text-sm font-medium ${idx === 0 ? 'text-blue-200' : 'text-slate-200'}`}>
+                        {task.title}
+                      </div>
+                      {task.description && (
+                        <div className={`text-xs mt-1 ${idx === 0 ? 'text-blue-200/70' : 'text-slate-400'}`}>
+                          {task.description}
+                        </div>
+                      )}
+                      {task.due_date && <div className="text-xs mt-2 text-amber-300/85">Due {task.due_date}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
-            <div className="text-sm font-medium text-slate-200 mb-3">3) Preview output</div>
-            {generatedTasks.length === 0 ? (
-              <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 p-4 text-sm text-slate-400">
-                Suggestions will appear here after generation.
+          {working && (
+            <div className="mt-4 rounded-2xl border border-blue-500/30 bg-blue-500/10 p-4">
+              <div className="flex items-center gap-2 text-sm text-blue-100 mb-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Live generation buffer
               </div>
-            ) : (
-              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                {generatedTasks.map((task, idx) => (
-                  <div
-                    key={`${task.title}-${idx}`}
-                    className={`rounded-xl border p-3 ${
-                      idx === 0
-                        ? 'border-blue-500/25 bg-blue-500/8'
-                        : 'border-slate-700/70 bg-slate-900/40'
-                    }`}
-                  >
-                    <div className={`text-sm font-medium ${idx === 0 ? 'text-blue-200' : 'text-slate-200'}`}>
-                      {task.title}
-                    </div>
-                    {task.description && (
-                      <div className={`text-xs mt-1 ${idx === 0 ? 'text-blue-200/70' : 'text-slate-400'}`}>
-                        {task.description}
-                      </div>
-                    )}
-                    {task.due_date && (
-                      <div className="text-xs mt-2 text-amber-300/85">Due {task.due_date}</div>
-                    )}
+              <div className="space-y-1 text-xs text-blue-200/90 font-medium">
+                {liveBuffer.slice(-6).map((line, idx) => (
+                  <div key={`${line}-${idx}`} className="flex items-center gap-2">
+                    <ChevronRight className="w-3 h-3" />
+                    <span>{line}</span>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {allowDeletionSuggestions && deletionSuggestions.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-4">
+              <div className="text-sm font-medium text-amber-100 mb-2">4) AI suggested deletions</div>
+              <div className="space-y-2">
+                {deletionSuggestions.map((item, idx) => (
+                  <div key={`${item.source}-${item.id}-${idx}`} className="rounded-xl border border-slate-700/70 bg-slate-950/50 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm text-slate-100">
+                          {item.title || '(Untitled)'}{' '}
+                          <span className="text-xs text-slate-400">[{item.source === 'board' ? 'Board' : 'Planner'}]</span>
+                        </div>
+                        {item.reason && <div className="text-xs text-slate-400 mt-1">{item.reason}</div>}
+                      </div>
+                      <button
+                        onClick={() =>
+                          setDeletionSuggestions((prev) =>
+                            prev.map((d, i) => (i === idx ? { ...d, selected: !d.selected } : d)),
+                          )
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs border ${
+                          item.selected
+                            ? 'border-red-500/40 bg-red-500/15 text-red-200'
+                            : 'border-slate-700/70 bg-slate-900/50 text-slate-300'
+                        }`}
+                      >
+                        {item.selected ? 'Delete on accept' : 'Keep item'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasSuggestions && (
+            <div className="mt-4 rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
+              <div className="text-sm font-medium text-slate-200 mb-2">Regenerate with extra context</div>
+              <textarea
+                value={regenInstructions}
+                onChange={(e) => setRegenInstructions(e.target.value)}
+                placeholder="Example: prioritize launch blockers first and avoid assigning due dates before March."
+                rows={3}
+                className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
+              />
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={() => void generate('regenerate')}
+                  disabled={working || !goal.trim()}
+                  className={`px-4 py-2.5 rounded-xl text-sm ${
+                    !working && goal.trim()
+                      ? 'border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 text-blue-200'
+                      : 'border border-slate-700 bg-slate-700 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  {working ? 'Regenerating...' : 'Regenerate'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
+              {error}
+            </div>
+          )}
         </div>
 
-        {generatedTasks.length > 0 && (
-          <div className="mt-5 rounded-2xl border border-slate-800/60 bg-slate-950/50 p-4">
-            <div className="text-sm font-medium text-slate-200 mb-2">Regenerate with extra context</div>
-            <textarea
-              value={regenInstructions}
-              onChange={(e) => setRegenInstructions(e.target.value)}
-              placeholder="Example: prioritize launch blockers first and avoid assigning due dates before March."
-              rows={3}
-              className="w-full rounded-xl bg-slate-950/60 border border-slate-800/60 px-4 py-2.5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35 resize-none"
-            />
-            <div className="mt-3 flex justify-end">
-              <button
-                onClick={() => void generate('regenerate')}
-                disabled={working || !goal.trim()}
-                className={`px-4 py-2.5 rounded-xl text-sm ${
-                  !working && goal.trim()
-                    ? 'border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 text-blue-200'
-                    : 'border border-slate-700 bg-slate-700 text-slate-400 cursor-not-allowed'
-                }`}
-              >
-                {working ? 'Regenerating...' : 'Regenerate'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-200">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+        <div className="pt-4 mt-4 border-t border-slate-800/70 flex flex-wrap items-center justify-end gap-2">
           <button
             onClick={onClose}
             className="px-4 py-2.5 rounded-xl border border-slate-800/70 bg-slate-900/30 hover:bg-slate-900/45 text-slate-200"
           >
             Close
           </button>
-          {generatedTasks.length > 0 && (
+          {hasSuggestions && (
             <>
               <button
-                onClick={() => setGeneratedTasks([])}
+                onClick={() => {
+                  setGeneratedTasks([]);
+                  setDeletionSuggestions([]);
+                  setLiveBuffer([]);
+                }}
                 disabled={working || accepting}
                 className="px-4 py-2.5 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-200 disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -1099,13 +1256,44 @@ function GeneratePlannerModal({
                 disabled={working || accepting}
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <Sparkles className="w-4 h-4" />
-                {accepting ? 'Adding Tasks...' : 'Accept Suggestions'}
+                {accepting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                {accepting ? 'Applying Suggestions...' : 'Accept Suggestions'}
               </button>
             </>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+function ToggleOption({
+  checked,
+  onClick,
+  label,
+}: {
+  checked: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+        checked
+          ? 'border-blue-500/45 bg-blue-500/15 text-blue-100'
+          : 'border-slate-700/70 bg-slate-900/35 text-slate-300 hover:bg-slate-900/50'
+      }`}
+    >
+      <span
+        className={`h-5 w-5 rounded-md border flex items-center justify-center ${
+          checked ? 'border-blue-300/70 bg-blue-500/30 text-blue-50' : 'border-slate-600 text-transparent'
+        }`}
+      >
+        <Check className="h-3.5 w-3.5" />
+      </span>
+      <span>{label}</span>
+    </button>
   );
 }
