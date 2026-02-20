@@ -33,6 +33,12 @@ function asString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function asLimitedString(value: unknown, max: number) {
+  const text = asString(value);
+  if (!text) return '';
+  return text.length > max ? text.slice(0, max).trim() : text;
+}
+
 function normalizeDueDate(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -45,18 +51,33 @@ function normalizeDueDate(value: unknown): string | null {
 function sanitizeContextItems(items: unknown) {
   if (!Array.isArray(items)) return [];
   return items
-    .slice(0, 40)
+    .slice(0, 20)
     .map((item) => {
       const row = (item || {}) as PlannerInputItem;
       return {
-        id: asString(row.id),
-        title: asString(row.title),
-        description: asString(row.description),
+        id: asLimitedString(row.id, 120),
+        title: asLimitedString(row.title, 180),
+        description: asLimitedString(row.description, 420),
         due_date: normalizeDueDate(row.due_date),
         completed: Boolean(row.completed),
       };
     })
     .filter((item) => item.id && item.title);
+}
+
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+  });
 }
 
 function safeJsonParse(content: string) {
@@ -106,6 +127,9 @@ function readBearerToken(req: any) {
 }
 
 export default async function handler(req: any, res: any) {
+  const DB_STEP_TIMEOUT_MS = 1100;
+  const OPENAI_TIMEOUT_MS = 4000;
+
   try {
     if (req.method !== 'POST') {
       return res.status(405).json({ error: 'Method not allowed' });
@@ -118,7 +142,7 @@ export default async function handler(req: any, res: any) {
 
     const body = parseBody(req.body);
 
-    const goal = asString(body?.goal);
+    const goal = asLimitedString(body?.goal, 1200);
     const projectId = asString(body?.projectId);
     if (!goal) {
       return res.status(400).json({ error: 'Goal is required.' });
@@ -138,24 +162,25 @@ export default async function handler(req: any, res: any) {
     }
 
     const db = createClient(cfg.url, cfg.serviceKey);
-    const { data: userData, error: userError } = await db.auth.getUser(accessToken);
+    const { data: userData, error: userError } = await withTimeout(
+      db.auth.getUser(accessToken),
+      DB_STEP_TIMEOUT_MS,
+      'Auth validation',
+    );
     if (userError || !userData.user) {
       return res.status(401).json({ error: 'Invalid auth session' });
     }
 
     const userId = userData.user.id;
-    const { data: profileData } = await db
-      .from('profiles')
-      .select('org_id')
-      .eq('id', userId)
-      .maybeSingle();
-    const userOrgId = (profileData as { org_id?: string | null } | null)?.org_id || null;
-
-    const { data: projectData, error: projectError } = await db
-      .from('projects')
-      .select('id,org_id,user_id,ai_plan_usage_count,ai_plan_unlimited')
-      .eq('id', projectId)
-      .maybeSingle();
+    const { data: projectData, error: projectError } = await withTimeout(
+      db
+        .from('projects')
+        .select('id,org_id,user_id,ai_plan_usage_count,ai_plan_unlimited')
+        .eq('id', projectId)
+        .maybeSingle(),
+      DB_STEP_TIMEOUT_MS,
+      'Project lookup',
+    );
     if (projectError || !projectData) {
       return res.status(404).json({ error: 'Project not found.' });
     }
@@ -167,6 +192,20 @@ export default async function handler(req: any, res: any) {
       ai_plan_usage_count?: number | null;
       ai_plan_unlimited?: boolean | null;
     };
+
+    let userOrgId: string | null = null;
+    if (project.user_id !== userId && project.org_id) {
+      const { data: profileData } = await withTimeout(
+        db
+          .from('profiles')
+          .select('org_id')
+          .eq('id', userId)
+          .maybeSingle(),
+        DB_STEP_TIMEOUT_MS,
+        'Profile lookup',
+      );
+      userOrgId = (profileData as { org_id?: string | null } | null)?.org_id || null;
+    }
     const hasProjectAccess =
       project.user_id === userId || (project.org_id && userOrgId && project.org_id === userOrgId);
     if (!hasProjectAccess) {
@@ -181,10 +220,14 @@ export default async function handler(req: any, res: any) {
       remaining: usageLimit as number | null,
     };
 
-    const { data: usageData, error: usageError } = await db.rpc('consume_project_ai_usage', {
-      p_project_id: projectId,
-      p_limit: usageLimit,
-    });
+    const { data: usageData, error: usageError } = await withTimeout(
+      db.rpc('consume_project_ai_usage', {
+        p_project_id: projectId,
+        p_limit: usageLimit,
+      }),
+      DB_STEP_TIMEOUT_MS,
+      'Usage consume',
+    );
 
     if (usageError) {
       // Fallback for environments where the RPC migration has not been applied yet.
@@ -205,10 +248,14 @@ export default async function handler(req: any, res: any) {
       }
 
       const nextUsed = currentUnlimited ? currentUsed : currentUsed + 1;
-      const { error: fallbackUpdateError } = await db
-        .from('projects')
-        .update({ ai_plan_usage_count: nextUsed, updated_at: new Date().toISOString() })
-        .eq('id', projectId);
+      const { error: fallbackUpdateError } = await withTimeout(
+        db
+          .from('projects')
+          .update({ ai_plan_usage_count: nextUsed, updated_at: new Date().toISOString() })
+          .eq('id', projectId),
+        DB_STEP_TIMEOUT_MS,
+        'Usage fallback update',
+      );
       if (fallbackUpdateError) {
         return res.status(503).json({
           error: 'Failed to process AI usage limit.',
@@ -244,7 +291,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const additionalInstructions = asString(body?.additionalInstructions);
+    const additionalInstructions = asLimitedString(body?.additionalInstructions, 1200);
     const allowDeletionSuggestions = Boolean(body?.allowDeletionSuggestions);
     const plannerTasks = sanitizeContextItems(body?.context?.plannerTasks);
     const boardCards = sanitizeContextItems(body?.context?.boardCards);
@@ -301,7 +348,7 @@ export default async function handler(req: any, res: any) {
 
     const controller = new AbortController();
     // Keep upstream call under common serverless timeout ceilings to avoid platform-level 500s.
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
     let openaiRes: Response;
     try {
       openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
