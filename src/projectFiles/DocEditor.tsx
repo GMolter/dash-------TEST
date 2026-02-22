@@ -7,6 +7,7 @@ import type { LinkTarget, ParsedMarkdownLink } from '../lib/linking';
 import {
   findMarkdownLinkAtClientPoint,
   findLinkAtPosition,
+  parseMarkdownLinks,
   removeMarkdownLink,
   replaceSelectionWithLink,
 } from '../lib/linking';
@@ -86,6 +87,7 @@ export function DocEditor({
   const [pendingRange, setPendingRange] = useState<LinkDraftRange | null>(null);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
+  const [editorScroll, setEditorScroll] = useState({ top: 0, left: 0 });
   const [fileTargets, setFileTargets] = useState<FileOption[]>([]);
   const [resourceTargets, setResourceTargets] = useState<ResourceOption[]>([]);
   const [plannerTargets, setPlannerTargets] = useState<PlannerOption[]>([]);
@@ -103,6 +105,7 @@ export function DocEditor({
     setContent(doc.content || '');
     lastSavedRef.current = doc.content || '';
     setSaved(true);
+    setEditorScroll({ top: 0, left: 0 });
   }, [doc.id, doc.name, doc.content]);
 
   useEffect(() => {
@@ -251,6 +254,15 @@ export function DocEditor({
   }, [fileTargets, resourceTargets, plannerTargets, boardTargets, projectId]);
 
   const status = useMemo(() => (saved ? 'Saved' : 'Saving...'), [saved]);
+  const decoratedSegments = useMemo(() => parseMarkdownLinks(content || ''), [content]);
+
+  function internalChipLabel(link: ParsedMarkdownLink): string {
+    if (!link.target || !link.target.type.startsWith('project_')) return '';
+    if (link.target.type === 'project_file') return 'File';
+    if (link.target.type === 'project_resource') return 'Resource';
+    if (link.target.type === 'project_planner') return 'Planner';
+    return 'Board';
+  }
 
   function applyEditorContent(next: string, nextCursor?: number) {
     setContent(next);
@@ -388,79 +400,134 @@ export function DocEditor({
         <div className="text-xs text-slate-400">Ctrl/Cmd+K inserts link when text is selected.</div>
       </div>
 
-      <textarea
-        ref={textareaRef}
-        value={content}
-        onChange={(e) => {
-          const next = e.target.value;
-          setContent(next);
-          onContentChange(next);
-          clearHoverPreview();
-        }}
-        onKeyDown={(e) => {
-          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-            const el = e.currentTarget;
-            if (el.selectionStart !== el.selectionEnd) {
-              e.preventDefault();
-              openLinkPicker(el.selectionStart, el.selectionEnd, null);
-            }
-          }
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          const el = e.currentTarget;
-          const base = el.selectionStart === el.selectionEnd ? Math.max(0, el.selectionStart - 1) : el.selectionStart;
-          const token =
-            findMarkdownLinkAtClientPoint(el, content, e.clientX, e.clientY) || findLinkAtPosition(content, base);
-          setCtxMenu({
-            x: e.clientX,
-            y: e.clientY,
-            token,
-            start: el.selectionStart,
-            end: el.selectionEnd,
-          });
-          clearHoverPreview();
-        }}
-        onMouseMove={(e) => {
-          const token = findMarkdownLinkAtClientPoint(e.currentTarget, content, e.clientX, e.clientY);
-          if (!token) {
+      <div className="relative mt-3 min-h-[420px] rounded-3xl border border-slate-800/60 bg-slate-950/60 focus-within:ring-2 focus-within:ring-blue-500/35">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
+          <div
+            className="min-h-[420px] px-5 py-4 text-[15px] leading-7 text-slate-100 whitespace-pre-wrap break-words"
+            style={{ transform: `translate(${-editorScroll.left}px, ${-editorScroll.top}px)` }}
+          >
+            {content.length === 0 ? (
+              <span className="text-slate-500">Write here...</span>
+            ) : (
+              decoratedSegments.map((segment, idx) => {
+                if (segment.kind === 'text') {
+                  return <span key={`text-${idx}`}>{segment.text}</span>;
+                }
+
+                const link = segment.link;
+                if (!link.target) {
+                  return <span key={`malformed-${idx}`}>{link.raw}</span>;
+                }
+
+                if (link.target.type === 'external' || link.target.type === 'help') {
+                  return (
+                    <span
+                      key={`ext-${idx}`}
+                      className="font-medium text-sky-300 underline decoration-sky-300/70 underline-offset-4"
+                    >
+                      {link.label}
+                    </span>
+                  );
+                }
+
+                const chipLabel = internalChipLabel(link);
+                return (
+                  <span
+                    key={`chip-${idx}`}
+                    className="mx-0.5 inline-flex items-center gap-1 rounded-2xl border border-cyan-400/40 bg-cyan-500/14 px-2.5 py-1 text-[11px] font-medium text-cyan-100 align-middle shadow-[0_0_0_1px_rgba(34,211,238,0.1)]"
+                  >
+                    <span className="rounded-full border border-cyan-300/45 bg-cyan-400/16 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-cyan-100">
+                      {chipLabel}
+                    </span>
+                    <span>{link.label}</span>
+                  </span>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <textarea
+          ref={textareaRef}
+          value={content}
+          spellCheck={false}
+          onChange={(e) => {
+            const next = e.target.value;
+            setContent(next);
+            onContentChange(next);
             clearHoverPreview();
-            return;
-          }
-
-          const tokenKey = `${token.start}:${token.end}:${token.href}`;
-          hoverPointRef.current = { x: e.clientX, y: e.clientY };
-
-          if (tokenKey === hoverTokenKeyRef.current) {
-            if (hoverPreview) {
-              setHoverPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+          }}
+          onKeyDown={(e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+              const el = e.currentTarget;
+              if (el.selectionStart !== el.selectionEnd) {
+                e.preventDefault();
+                openLinkPicker(el.selectionStart, el.selectionEnd, null);
+              }
             }
-            return;
-          }
-
-          if (hoverTimerRef.current) {
-            window.clearTimeout(hoverTimerRef.current);
-            hoverTimerRef.current = null;
-          }
-
-          hoverTokenKeyRef.current = tokenKey;
-          setHoverPreview(null);
-          const nextPreview = buildHoverPreview(token);
-          hoverTimerRef.current = window.setTimeout(() => {
-            setHoverPreview({
-              ...nextPreview,
-              x: hoverPointRef.current.x,
-              y: hoverPointRef.current.y,
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const el = e.currentTarget;
+            const base = el.selectionStart === el.selectionEnd ? Math.max(0, el.selectionStart - 1) : el.selectionStart;
+            const token =
+              findMarkdownLinkAtClientPoint(el, content, e.clientX, e.clientY) || findLinkAtPosition(content, base);
+            setCtxMenu({
+              x: e.clientX,
+              y: e.clientY,
+              token,
+              start: el.selectionStart,
+              end: el.selectionEnd,
             });
-            hoverTimerRef.current = null;
-          }, 1000);
-        }}
-        onMouseLeave={clearHoverPreview}
-        onScroll={clearHoverPreview}
-        data-link-editor="true"
-        placeholder="Write here..."
-        className="mt-3 min-h-[420px] w-full resize-none rounded-3xl border border-slate-800/60 bg-slate-950/60 px-5 py-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
-      />
+            clearHoverPreview();
+          }}
+          onMouseMove={(e) => {
+            const token = findMarkdownLinkAtClientPoint(e.currentTarget, content, e.clientX, e.clientY);
+            if (!token) {
+              clearHoverPreview();
+              return;
+            }
+
+            const tokenKey = `${token.start}:${token.end}:${token.href}`;
+            hoverPointRef.current = { x: e.clientX, y: e.clientY };
+
+            if (tokenKey === hoverTokenKeyRef.current) {
+              if (hoverPreview) {
+                setHoverPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+              }
+              return;
+            }
+
+            if (hoverTimerRef.current) {
+              window.clearTimeout(hoverTimerRef.current);
+              hoverTimerRef.current = null;
+            }
+
+            hoverTokenKeyRef.current = tokenKey;
+            setHoverPreview(null);
+            const nextPreview = buildHoverPreview(token);
+            hoverTimerRef.current = window.setTimeout(() => {
+              setHoverPreview({
+                ...nextPreview,
+                x: hoverPointRef.current.x,
+                y: hoverPointRef.current.y,
+              });
+              hoverTimerRef.current = null;
+            }, 1000);
+          }}
+          onMouseLeave={clearHoverPreview}
+          onScroll={(e) => {
+            setEditorScroll({
+              top: e.currentTarget.scrollTop,
+              left: e.currentTarget.scrollLeft,
+            });
+            clearHoverPreview();
+          }}
+          data-link-editor="true"
+          aria-label="Document editor"
+          className="relative z-10 min-h-[420px] w-full resize-none rounded-3xl bg-transparent px-5 py-4 text-[15px] leading-7 text-transparent caret-slate-100 selection:bg-blue-500/30 focus:outline-none"
+        />
+      </div>
 
       <LinkHoverPreview
         visible={!!hoverPreview}
