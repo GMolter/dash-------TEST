@@ -8,6 +8,7 @@ export type ArticleBlock =
   | { kind: 'heading'; level: number; text: string; anchorId: string }
   | { kind: 'unordered_list'; items: string[] }
   | { kind: 'ordered_list'; items: string[] }
+  | { kind: 'horizontal_rule' }
   | { kind: 'paragraph'; lines: string[] };
 
 function normalizeContent(content: string): string {
@@ -40,13 +41,17 @@ function parseHeadingLine(line: string): { level: number; text: string } | null 
 }
 
 function parseUnorderedListLine(line: string): string | null {
-  const match = line.match(/^\s{0,3}[-*+]\s+(.+)\s*$/);
+  const match = line.match(/^\s{0,3}(?:[-*+]|•)\s*(.*)\s*$/);
   return match ? match[1].trim() : null;
 }
 
 function parseOrderedListLine(line: string): string | null {
-  const match = line.match(/^\s{0,3}\d+\.\s+(.+)\s*$/);
+  const match = line.match(/^\s{0,3}\d+\.\s*(.*)\s*$/);
   return match ? match[1].trim() : null;
+}
+
+function isHorizontalRuleLine(line: string): boolean {
+  return /^\s{0,3}(?:-{3,}|_{3,}|\*{3,})\s*$/.test(line);
 }
 
 export function extractArticleAnchors(content: string): ArticleAnchor[] {
@@ -77,6 +82,12 @@ export function parseArticleBlocks(content: string): ArticleBlock[] {
     const current = lines[i];
 
     if (!current.trim()) {
+      i += 1;
+      continue;
+    }
+
+    if (isHorizontalRuleLine(current)) {
+      blocks.push({ kind: 'horizontal_rule' });
       i += 1;
       continue;
     }
@@ -123,6 +134,7 @@ export function parseArticleBlocks(content: string): ArticleBlock[] {
     while (i < lines.length) {
       const line = lines[i];
       if (!line.trim()) break;
+      if (isHorizontalRuleLine(line)) break;
       if (parseHeadingLine(line)) break;
       if (parseUnorderedListLine(line) !== null) break;
       if (parseOrderedListLine(line) !== null) break;

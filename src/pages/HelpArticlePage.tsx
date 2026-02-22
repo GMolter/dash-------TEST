@@ -175,7 +175,7 @@ export function HelpArticlePage({ slug }: { slug: string }) {
                   content={article.content || 'No content yet.'}
                   resolveMeta={resolveMeta}
                   resolveHelpHref={resolveHelpHref}
-                  className="space-y-4 text-sm leading-6 text-slate-100 font-sans"
+                  className="space-y-4 text-sm leading-6 text-slate-100 font-sans break-words [overflow-wrap:anywhere]"
                   onActivateHelpTeleport={(anchorId) => {
                     const target = document.getElementById(anchorId);
                     if (!target) return;

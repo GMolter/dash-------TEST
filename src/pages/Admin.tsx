@@ -17,8 +17,6 @@ import {
   List,
   ListOrdered,
   CornerDownLeft,
-  Maximize2,
-  Minimize2,
   ArrowLeft,
 } from "lucide-react";
 import type { LinkPickerOption } from "../components/linking/types";
@@ -87,6 +85,13 @@ function slugify(input: string) {
     .slice(0, 80);
 }
 
+function getLineBounds(content: string, position: number) {
+  const start = content.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+  const nextBreak = content.indexOf("\n", position);
+  const end = nextBreak === -1 ? content.length : nextBreak;
+  return { start, end };
+}
+
 type AdminProps = {
   editorOnly?: boolean;
 };
@@ -122,7 +127,6 @@ export default function Admin({ editorOnly = false }: AdminProps) {
   const [articlePublished, setArticlePublished] = useState(false);
   const [articleSortOrder, setArticleSortOrder] = useState(0);
   const [articleFilter, setArticleFilter] = useState<ArticleFilter>("all");
-  const [articleEditorFullscreen, setArticleEditorFullscreen] = useState(true);
   const [articleLinkPickerOpen, setArticleLinkPickerOpen] = useState(false);
   const [articleLinkInitialLabel, setArticleLinkInitialLabel] = useState("");
   const [articlePendingRange, setArticlePendingRange] = useState<LinkDraftRange | null>(null);
@@ -224,11 +228,25 @@ export default function Admin({ editorOnly = false }: AdminProps) {
     const blockEnd = lineAfterEnd === -1 ? articleContent.length : lineAfterEnd;
     const blockText = articleContent.slice(blockStart, blockEnd);
     const lines = blockText.split("\n");
-    const nextLines = lines.map((line, idx) => {
+    const hasNonEmpty = lines.some((line) => line.trim().length > 0);
+    if (!hasNonEmpty) {
+      const marker = mode === "ordered" ? "1. " : "• ";
+      const nextContent = `${articleContent.slice(0, blockStart)}${marker}${articleContent.slice(blockEnd)}`;
+      const cursor = blockStart + marker.length;
+      applyArticleContentEdit(nextContent, cursor, cursor);
+      return;
+    }
+
+    let orderedCounter = 1;
+    const nextLines = lines.map((line) => {
       if (!line.trim()) return line;
-      const clean = line.replace(/^\s*(?:[-*+]\s+|\d+\.\s+)/, "");
-      if (mode === "ordered") return `${idx + 1}. ${clean}`;
-      return `- ${clean}`;
+      const clean = line.replace(/^\s*(?:[-*+]|•|\d+\.)\s+/, "");
+      if (mode === "ordered") {
+        const numbered = `${orderedCounter}. ${clean}`;
+        orderedCounter += 1;
+        return numbered;
+      }
+      return `• ${clean}`;
     });
 
     const replacement = nextLines.join("\n");
@@ -236,14 +254,74 @@ export default function Admin({ editorOnly = false }: AdminProps) {
     applyArticleContentEdit(nextContent, blockStart, blockStart + replacement.length);
   }
 
-  function insertArticleLineBreak() {
+  function insertArticleHorizontalRule() {
     const el = articleTextareaRef.current;
     if (!el) return;
     const start = el.selectionStart;
     const end = el.selectionEnd;
-    const nextContent = replaceContentRange(articleContent, start, end, "\n");
-    const nextCursor = start + 1;
+    const insertion = "\n---\n";
+    const nextContent = replaceContentRange(articleContent, start, end, insertion);
+    const nextCursor = start + insertion.length;
     applyArticleContentEdit(nextContent, nextCursor, nextCursor);
+  }
+
+  function insertArticleNewline(withListContinuation: boolean) {
+    const el = articleTextareaRef.current;
+    if (!el) return;
+
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+
+    if (!withListContinuation || start !== end) {
+      const next = replaceContentRange(articleContent, start, end, "\n");
+      const cursor = start + 1;
+      applyArticleContentEdit(next, cursor, cursor);
+      return;
+    }
+
+    const { start: lineStart, end: lineEnd } = getLineBounds(articleContent, start);
+    const currentLine = articleContent.slice(lineStart, lineEnd);
+    const unorderedMatch = currentLine.match(/^(\s*)(?:[-*+]|•)\s+(.*)$/);
+    const orderedMatch = currentLine.match(/^(\s*)(\d+)\.\s+(.*)$/);
+
+    if (!unorderedMatch && !orderedMatch) {
+      const next = replaceContentRange(articleContent, start, end, "\n");
+      const cursor = start + 1;
+      applyArticleContentEdit(next, cursor, cursor);
+      return;
+    }
+
+    if (unorderedMatch) {
+      const indent = unorderedMatch[1] || "";
+      const textAfterMarker = unorderedMatch[2] || "";
+      if (!textAfterMarker.trim()) {
+        const cleanedLine = `${indent}`;
+        const next = replaceContentRange(articleContent, lineStart, lineEnd, cleanedLine);
+        const cursor = lineStart + cleanedLine.length;
+        applyArticleContentEdit(next, cursor, cursor);
+        return;
+      }
+      const marker = `\n${indent}• `;
+      const next = replaceContentRange(articleContent, start, end, marker);
+      const cursor = start + marker.length;
+      applyArticleContentEdit(next, cursor, cursor);
+      return;
+    }
+
+    const indent = orderedMatch?.[1] || "";
+    const currentNum = Number(orderedMatch?.[2] || 1);
+    const textAfterMarker = orderedMatch?.[3] || "";
+    if (!textAfterMarker.trim()) {
+      const cleanedLine = `${indent}`;
+      const next = replaceContentRange(articleContent, lineStart, lineEnd, cleanedLine);
+      const cursor = lineStart + cleanedLine.length;
+      applyArticleContentEdit(next, cursor, cursor);
+      return;
+    }
+    const marker = `\n${indent}${currentNum + 1}. `;
+    const next = replaceContentRange(articleContent, start, end, marker);
+    const cursor = start + marker.length;
+    applyArticleContentEdit(next, cursor, cursor);
   }
 
   function buildArticleHoverPreview(link: ParsedMarkdownLink): Omit<HoverPreviewState, "x" | "y"> {
@@ -436,7 +514,6 @@ export default function Admin({ editorOnly = false }: AdminProps) {
   useEffect(() => {
     if (!editorOnly) return;
     setActiveTab("help-docs");
-    setArticleEditorFullscreen(true);
   }, [editorOnly]);
 
   function navigateTo(path: string) {
@@ -629,7 +706,7 @@ export default function Admin({ editorOnly = false }: AdminProps) {
     return d.toLocaleString();
   }
 
-  const isWideEditorLayout = editorOnly || articleEditorFullscreen;
+  const isWideEditorLayout = true;
 
   if (!authed) {
     return (
@@ -894,7 +971,47 @@ export default function Admin({ editorOnly = false }: AdminProps) {
               </section>
             )}
 
-            {activeTab === "help-docs" && (
+            {activeTab === "help-docs" && !editorOnly && (
+              <section className="space-y-4">
+                <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-5">
+                  <h2 className="text-lg font-semibold text-slate-100">Help Article Editor</h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Editing moved to a dedicated page for full-width writing and formatting controls.
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => navigateTo("/admin/editor")}
+                      className="inline-flex items-center gap-2 rounded-lg border border-blue-500/35 bg-blue-500/12 px-4 py-2 text-sm text-blue-100 hover:bg-blue-500/20"
+                    >
+                      Open Editor Page
+                    </button>
+                    <div className="text-xs text-slate-400">
+                      Path: <code>/admin/editor</code>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-4">
+                  <div className="mb-3 text-sm text-slate-300">Recent Articles</div>
+                  <div className="space-y-2">
+                    {loadingArticles ? (
+                      <div className="text-sm text-slate-400">Loading...</div>
+                    ) : articles.length === 0 ? (
+                      <div className="text-sm text-slate-500">No articles yet.</div>
+                    ) : (
+                      articles.slice(0, 8).map((article) => (
+                        <div key={article.id} className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-2">
+                          <div className="text-sm font-medium text-slate-100 truncate">{article.title}</div>
+                          <div className="text-xs text-slate-400 truncate">/help/article/{article.slug}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {activeTab === "help-docs" && editorOnly && (
               <section>
                 <div
                   className={
@@ -1010,23 +1127,6 @@ export default function Admin({ editorOnly = false }: AdminProps) {
                       <div className="text-xs text-slate-400">
                         {selectedArticle ? `Updated ${formatUpdatedAt(selectedArticle.updated_at)}` : "Unsaved draft"}
                       </div>
-                      {!editorOnly && (
-                        <button
-                          onClick={() => setArticleEditorFullscreen((v) => !v)}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
-                        >
-                          {articleEditorFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-                          {articleEditorFullscreen ? "Exit Full Screen" : "Full Screen"}
-                        </button>
-                      )}
-                      {!editorOnly && (
-                        <button
-                          onClick={() => navigateTo("/admin/editor")}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/35 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100 hover:bg-blue-500/20"
-                        >
-                          Open Dedicated Page
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -1125,11 +1225,11 @@ export default function Admin({ editorOnly = false }: AdminProps) {
                         Ordered List
                       </button>
                       <button
-                        onClick={insertArticleLineBreak}
+                        onClick={insertArticleHorizontalRule}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
                       >
                         <CornerDownLeft className="h-3.5 w-3.5" />
-                        Line Break
+                        Horizontal Line
                       </button>
                     </div>
                     <div className="mt-2 text-xs text-slate-400">
@@ -1149,6 +1249,16 @@ export default function Admin({ editorOnly = false }: AdminProps) {
                           if (el.selectionStart !== el.selectionEnd) {
                             e.preventDefault();
                             openArticleLinkPicker(el.selectionStart, el.selectionEnd, null);
+                          }
+                          return;
+                        }
+
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (e.shiftKey) {
+                            insertArticleNewline(false);
+                          } else {
+                            insertArticleNewline(true);
                           }
                         }
                       }}
@@ -1209,7 +1319,7 @@ export default function Admin({ editorOnly = false }: AdminProps) {
                       className={`mt-2 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 ${
                         isWideEditorLayout ? "min-h-[58vh]" : ""
                       }`}
-                      placeholder="Use markdown-style formatting (# heading, - list, 1. list)."
+                      placeholder="Use markdown-style formatting (# heading, • list, 1. list)."
                     />
                     <LinkHoverPreview
                       visible={!!articleHoverPreview}

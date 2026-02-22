@@ -195,7 +195,7 @@ export function LinkedContent({
               activateHelpTeleport(link.target.anchorId);
             }
           }}
-          className={`inline cursor-pointer border-none bg-transparent p-0 text-left align-baseline font-medium underline underline-offset-4 ${
+          className={`inline cursor-pointer border-none bg-transparent p-0 text-left align-baseline font-medium underline underline-offset-4 break-all ${
             isMissing
               ? 'text-red-300 decoration-red-300/70'
               : isTeleport
@@ -212,7 +212,7 @@ export function LinkedContent({
 
   return (
     <>
-      <div className={className || 'text-sm leading-6 text-slate-100'}>
+      <div className={className || 'text-sm leading-6 text-slate-100 break-words [overflow-wrap:anywhere]'}>
         {blocks.map((block, blockIdx) => {
           if (block.kind === 'heading') {
             const headingClass =
@@ -280,6 +280,10 @@ export function LinkedContent({
                 ))}
               </ol>
             );
+          }
+
+          if (block.kind === 'horizontal_rule') {
+            return <hr key={`block-${blockIdx}`} className="my-3 border-slate-700/80" />;
           }
 
           return (
