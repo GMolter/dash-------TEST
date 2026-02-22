@@ -5,14 +5,15 @@ import { updateNode } from './store';
 import { supabase } from '../lib/supabase';
 import type { LinkTarget, ParsedMarkdownLink } from '../lib/linking';
 import {
+  findMarkdownLinkAtClientPoint,
   findLinkAtPosition,
   removeMarkdownLink,
   replaceSelectionWithLink,
 } from '../lib/linking';
 import { LinkPickerModal } from '../components/linking/LinkPickerModal';
 import { EditorContextMenu } from '../components/linking/EditorContextMenu';
-import { LinkedContent } from '../components/linking/renderLinkedContent';
-import type { LinkPickerOption, LinkResolvedMeta } from '../components/linking/types';
+import { LinkHoverPreview } from '../components/linking/LinkHoverPreview';
+import type { LinkPickerOption } from '../components/linking/types';
 
 type LinkDraftRange = {
   start: number;
@@ -26,6 +27,15 @@ type ContextMenuState = {
   token: ParsedMarkdownLink | null;
   start: number;
   end: number;
+};
+
+type HoverPreviewState = {
+  x: number;
+  y: number;
+  title: string;
+  subtitle?: string;
+  warning?: string;
+  actionHint?: string;
 };
 
 type FileOption = {
@@ -61,14 +71,12 @@ export function DocEditor({
   onTitleChange,
   onContentChange,
   onSaved,
-  onActivateInternalLink,
 }: {
   projectId: string;
   doc: FileNode;
   onTitleChange: (name: string) => void;
   onContentChange: (content: string) => void;
   onSaved?: () => void;
-  onActivateInternalLink?: (link: ParsedMarkdownLink) => void;
 }) {
   const [title, setTitle] = useState(doc.name);
   const [content, setContent] = useState(doc.content || '');
@@ -77,12 +85,16 @@ export function DocEditor({
   const [linkPickerInitialLabel, setLinkPickerInitialLabel] = useState('');
   const [pendingRange, setPendingRange] = useState<LinkDraftRange | null>(null);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
   const [fileTargets, setFileTargets] = useState<FileOption[]>([]);
   const [resourceTargets, setResourceTargets] = useState<ResourceOption[]>([]);
   const [plannerTargets, setPlannerTargets] = useState<PlannerOption[]>([]);
   const [boardTargets, setBoardTargets] = useState<BoardOption[]>([]);
 
   const saveTimer = useRef<number | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+  const hoverTokenKeyRef = useRef<string | null>(null);
+  const hoverPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastSavedRef = useRef<string>(content);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -173,6 +185,15 @@ export function DocEditor({
     };
   }, [content, doc.id, onSaved]);
 
+  useEffect(() => {
+    return () => {
+      if (hoverTimerRef.current) {
+        window.clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const linkOptions = useMemo<LinkPickerOption[]>(() => {
     const fileItems: LinkPickerOption[] = fileTargets.map((file) => ({
       id: `file-${file.id}`,
@@ -231,101 +252,6 @@ export function DocEditor({
 
   const status = useMemo(() => (saved ? 'Saved' : 'Saving...'), [saved]);
 
-  const resolveMeta = useMemo(() => {
-    const fileMap = new Map(fileTargets.map((item) => [item.id, item]));
-    const resourceMap = new Map(resourceTargets.map((item) => [item.id, item]));
-    const plannerMap = new Map(plannerTargets.map((item) => [item.id, item]));
-    const boardMap = new Map(boardTargets.map((item) => [item.id, item]));
-
-    return (link: ParsedMarkdownLink): LinkResolvedMeta => {
-      if (!link.target) {
-        return { exists: false, title: link.label, subtitle: 'Invalid link target' };
-      }
-
-      if (link.target.type === 'external') {
-        return {
-          exists: true,
-          title: link.label,
-          subtitle: link.target.url,
-        };
-      }
-
-      if (link.target.type === 'help') {
-        return {
-          exists: true,
-          title: link.label,
-          subtitle: `Help reference ${link.target.articleId}`,
-        };
-      }
-
-      if (link.target.type === 'project_file') {
-        const item = fileMap.get(link.target.targetId);
-        if (!item) {
-          return {
-            exists: false,
-            title: link.label,
-            subtitle: 'File reference unavailable',
-            warning: 'This target may have been deleted or you no longer have access.',
-          };
-        }
-        return {
-          exists: true,
-          title: item.name,
-          subtitle: item.type === 'upload' ? 'Uploaded file' : 'Document',
-        };
-      }
-
-      if (link.target.type === 'project_resource') {
-        const item = resourceMap.get(link.target.targetId);
-        if (!item) {
-          return {
-            exists: false,
-            title: link.label,
-            subtitle: 'Resource reference unavailable',
-            warning: 'This target may have been deleted or you no longer have access.',
-          };
-        }
-        return {
-          exists: true,
-          title: item.title?.trim() || item.url,
-          subtitle: item.url,
-        };
-      }
-
-      if (link.target.type === 'project_planner') {
-        const item = plannerMap.get(link.target.targetId);
-        if (!item) {
-          return {
-            exists: false,
-            title: link.label,
-            subtitle: 'Planner reference unavailable',
-            warning: 'This target may have been deleted or you no longer have access.',
-          };
-        }
-        return {
-          exists: true,
-          title: item.title || '(Untitled task)',
-          subtitle: item.completed ? 'Planner task (completed)' : 'Planner task',
-        };
-      }
-
-      const board = boardMap.get(link.target.targetId);
-      if (!board) {
-        return {
-          exists: false,
-          title: link.label,
-          subtitle: 'Board reference unavailable',
-          warning: 'This target may have been deleted or you no longer have access.',
-        };
-      }
-      return {
-        exists: true,
-        title: board.title || '(Untitled card)',
-        subtitle: board.completed ? 'Board card (completed)' : 'Board card',
-      };
-    };
-  }, [fileTargets, resourceTargets, plannerTargets, boardTargets]);
-
   function applyEditorContent(next: string, nextCursor?: number) {
     setContent(next);
     onContentChange(next);
@@ -342,6 +268,84 @@ export function DocEditor({
     setPendingRange({ start, end, initialTarget });
     setLinkPickerInitialLabel(selectionLabel);
     setLinkPickerOpen(true);
+  }
+
+  function clearHoverPreview() {
+    if (hoverTimerRef.current) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    hoverTokenKeyRef.current = null;
+    setHoverPreview(null);
+  }
+
+  function buildHoverPreview(link: ParsedMarkdownLink): Omit<HoverPreviewState, 'x' | 'y'> {
+    if (!link.target) {
+      return {
+        title: link.label,
+        subtitle: link.href,
+        warning: 'Malformed link token.',
+        actionHint: 'Reference unavailable',
+      };
+    }
+
+    if (link.target.type === 'external') {
+      return {
+        title: link.label,
+        subtitle: link.target.url,
+        actionHint: 'Opens in new tab',
+      };
+    }
+
+    if (link.target.type === 'help') {
+      return {
+        title: link.label,
+        subtitle: `Help article (${link.target.articleId})`,
+        actionHint: 'Opens in new tab',
+      };
+    }
+
+    if (link.target.type === 'project_file') {
+      const target = fileTargets.find((file) => file.id === link.target?.targetId);
+      const isMissing = !target;
+      return {
+        title: target?.name || link.label,
+        subtitle: target ? (target.type === 'upload' ? 'Project file' : 'Project document') : 'Project file reference',
+        warning: isMissing ? 'Reference unavailable.' : undefined,
+        actionHint: isMissing ? 'Reference unavailable' : 'In-app reference (Files tab)',
+      };
+    }
+
+    if (link.target.type === 'project_resource') {
+      const target = resourceTargets.find((resource) => resource.id === link.target?.targetId);
+      const isMissing = !target;
+      return {
+        title: target?.title || link.label,
+        subtitle: target?.url || 'Project resource reference',
+        warning: isMissing ? 'Reference unavailable.' : undefined,
+        actionHint: isMissing ? 'Reference unavailable' : 'In-app reference (Resources tab)',
+      };
+    }
+
+    if (link.target.type === 'project_planner') {
+      const target = plannerTargets.find((task) => task.id === link.target?.targetId);
+      const isMissing = !target;
+      return {
+        title: target?.title || link.label,
+        subtitle: target ? (target.archived ? 'Archived planner task' : 'Planner task') : 'Planner task reference',
+        warning: isMissing ? 'Reference unavailable.' : undefined,
+        actionHint: isMissing ? 'Reference unavailable' : 'In-app reference (Planner tab)',
+      };
+    }
+
+    const target = boardTargets.find((card) => card.id === link.target.targetId);
+    const isMissing = !target;
+    return {
+      title: target?.title || link.label,
+      subtitle: target ? (target.archived ? 'Archived board task' : 'Board task') : 'Board task reference',
+      warning: isMissing ? 'Reference unavailable.' : undefined,
+      actionHint: isMissing ? 'Reference unavailable' : 'In-app reference (Board tab)',
+    };
   }
 
   return (
@@ -391,6 +395,7 @@ export function DocEditor({
           const next = e.target.value;
           setContent(next);
           onContentChange(next);
+          clearHoverPreview();
         }}
         onKeyDown={(e) => {
           if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -405,7 +410,7 @@ export function DocEditor({
           e.preventDefault();
           const el = e.currentTarget;
           const base = el.selectionStart === el.selectionEnd ? Math.max(0, el.selectionStart - 1) : el.selectionStart;
-          const token = findLinkAtPosition(content, base);
+          const token = findMarkdownLinkAtClientPoint(el, content, e.clientX, e.clientY) || findLinkAtPosition(content, base);
           setCtxMenu({
             x: e.clientX,
             y: e.clientY,
@@ -413,20 +418,58 @@ export function DocEditor({
             start: el.selectionStart,
             end: el.selectionEnd,
           });
+          clearHoverPreview();
         }}
+        onMouseMove={(e) => {
+          const token = findMarkdownLinkAtClientPoint(e.currentTarget, content, e.clientX, e.clientY);
+          if (!token) {
+            clearHoverPreview();
+            return;
+          }
+
+          const tokenKey = `${token.start}:${token.end}:${token.href}`;
+          hoverPointRef.current = { x: e.clientX, y: e.clientY };
+
+          if (tokenKey === hoverTokenKeyRef.current) {
+            if (hoverPreview) {
+              setHoverPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+            }
+            return;
+          }
+
+          if (hoverTimerRef.current) {
+            window.clearTimeout(hoverTimerRef.current);
+            hoverTimerRef.current = null;
+          }
+
+          hoverTokenKeyRef.current = tokenKey;
+          setHoverPreview(null);
+          const nextPreview = buildHoverPreview(token);
+          hoverTimerRef.current = window.setTimeout(() => {
+            setHoverPreview({
+              ...nextPreview,
+              x: hoverPointRef.current.x,
+              y: hoverPointRef.current.y,
+            });
+            hoverTimerRef.current = null;
+          }, 1000);
+        }}
+        onMouseLeave={clearHoverPreview}
+        onScroll={clearHoverPreview}
         data-link-editor="true"
         placeholder="Write here..."
         className="mt-3 min-h-[420px] w-full resize-none rounded-3xl border border-slate-800/60 bg-slate-950/60 px-5 py-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
       />
 
-      <div className="mt-5 rounded-2xl border border-slate-800/70 bg-slate-950/45 p-4">
-        <div className="mb-3 text-xs uppercase tracking-wide text-slate-400">Live Preview</div>
-        <LinkedContent
-          content={content}
-          resolveMeta={resolveMeta}
-          onActivateInternalLink={(link) => onActivateInternalLink?.(link)}
-        />
-      </div>
+      <LinkHoverPreview
+        visible={!!hoverPreview}
+        x={hoverPreview?.x || 0}
+        y={hoverPreview?.y || 0}
+        title={hoverPreview?.title || ''}
+        subtitle={hoverPreview?.subtitle}
+        warning={hoverPreview?.warning}
+        actionHint={hoverPreview?.actionHint}
+      />
 
       <EditorContextMenu
         open={!!ctxMenu}

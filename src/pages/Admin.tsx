@@ -15,12 +15,17 @@ import {
   HelpCircle,
   Link2,
 } from "lucide-react";
-import type { LinkPickerOption, LinkResolvedMeta } from "../components/linking/types";
+import type { LinkPickerOption } from "../components/linking/types";
 import { LinkPickerModal } from "../components/linking/LinkPickerModal";
 import { EditorContextMenu } from "../components/linking/EditorContextMenu";
-import { LinkedContent } from "../components/linking/renderLinkedContent";
+import { LinkHoverPreview } from "../components/linking/LinkHoverPreview";
 import type { LinkTarget, ParsedMarkdownLink } from "../lib/linking";
-import { findLinkAtPosition, removeMarkdownLink, replaceSelectionWithLink } from "../lib/linking";
+import {
+  findLinkAtPosition,
+  findMarkdownLinkAtClientPoint,
+  removeMarkdownLink,
+  replaceSelectionWithLink,
+} from "../lib/linking";
 
 type BannerState = {
   enabled: boolean;
@@ -54,6 +59,15 @@ type ContextMenuState = {
   token: ParsedMarkdownLink | null;
   start: number;
   end: number;
+};
+
+type HoverPreviewState = {
+  x: number;
+  y: number;
+  title: string;
+  subtitle?: string;
+  warning?: string;
+  actionHint?: string;
 };
 
 function slugify(input: string) {
@@ -100,9 +114,13 @@ export default function Admin() {
   const [articleLinkInitialLabel, setArticleLinkInitialLabel] = useState("");
   const [articlePendingRange, setArticlePendingRange] = useState<LinkDraftRange | null>(null);
   const [articleCtxMenu, setArticleCtxMenu] = useState<ContextMenuState | null>(null);
+  const [articleHoverPreview, setArticleHoverPreview] = useState<HoverPreviewState | null>(null);
 
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const articleTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const articleHoverTimerRef = useRef<number | null>(null);
+  const articleHoverTokenKeyRef = useRef<string | null>(null);
+  const articleHoverPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const canSaveBanner = useMemo(() => {
     if (!banner.enabled) return true;
@@ -135,54 +153,61 @@ export default function Admin() {
     [articles]
   );
 
-  const resolveHelpHref = useMemo(() => {
-    const byId = new Map(articles.map((article) => [article.id, article]));
-    return (articleId: string) => {
-      const article = byId.get(articleId);
-      if (!article) return "/help";
-      return `/help/article/${article.slug}`;
-    };
-  }, [articles]);
-
-  const resolveHelpMeta = useMemo(() => {
-    const byId = new Map(articles.map((article) => [article.id, article]));
-    return (link: ParsedMarkdownLink): LinkResolvedMeta => {
-      if (!link.target) {
-        return { exists: false, title: link.label, subtitle: "Invalid link" };
-      }
-      if (link.target.type === "external") {
-        return { exists: true, title: link.label, subtitle: link.target.url };
-      }
-      if (link.target.type === "help") {
-        const article = byId.get(link.target.articleId);
-        if (!article) {
-          return {
-            exists: false,
-            title: link.label,
-            subtitle: "Help article unavailable",
-            warning: "This target may have been deleted or you no longer have access.",
-          };
-        }
-        return {
-          exists: true,
-          title: article.title,
-          subtitle: article.is_published ? "Published help article" : "Draft help article",
-          warning: article.is_published ? undefined : "Draft links may 404 publicly until published.",
-        };
-      }
-      return {
-        exists: false,
-        title: link.label,
-        subtitle: "Unsupported target for help editor",
-      };
-    };
-  }, [articles]);
-
   function openArticleLinkPicker(start: number, end: number, initialTarget: LinkTarget | null) {
     const selection = start !== end ? articleContent.slice(start, end) : "";
     setArticlePendingRange({ start, end, initialTarget });
     setArticleLinkInitialLabel(selection);
     setArticleLinkPickerOpen(true);
+  }
+
+  function clearArticleHoverPreview() {
+    if (articleHoverTimerRef.current) {
+      window.clearTimeout(articleHoverTimerRef.current);
+      articleHoverTimerRef.current = null;
+    }
+    articleHoverTokenKeyRef.current = null;
+    setArticleHoverPreview(null);
+  }
+
+  function buildArticleHoverPreview(link: ParsedMarkdownLink): Omit<HoverPreviewState, "x" | "y"> {
+    if (!link.target) {
+      return {
+        title: link.label,
+        subtitle: link.href,
+        warning: "Malformed link token.",
+        actionHint: "Reference unavailable",
+      };
+    }
+
+    if (link.target.type === "external") {
+      return {
+        title: link.label,
+        subtitle: link.target.url,
+        actionHint: "Opens in new tab",
+      };
+    }
+
+    if (link.target.type === "help") {
+      const article = articles.find((item) => item.id === link.target?.articleId);
+      const missing = !article;
+      return {
+        title: article?.title || link.label,
+        subtitle: article
+          ? `/help/article/${article.slug}${article.is_published ? "" : " (Draft)"}`
+          : `Help article (${link.target.articleId})`,
+        warning: missing
+          ? "Reference unavailable."
+          : (article && !article.is_published ? "Draft links may 404 publicly until published." : undefined),
+        actionHint: "Opens in new tab",
+      };
+    }
+
+    return {
+      title: link.label,
+      subtitle: "Project reference",
+      warning: "Unsupported in this editor.",
+      actionHint: "Reference unavailable",
+    };
   }
 
   async function adminFetch(url: string, init?: RequestInit) {
@@ -308,6 +333,15 @@ export default function Admin() {
     bootstrap();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (articleHoverTimerRef.current) {
+        window.clearTimeout(articleHoverTimerRef.current);
+        articleHoverTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -928,7 +962,10 @@ export default function Admin() {
                       ref={articleTextareaRef}
                       rows={14}
                       value={articleContent}
-                      onChange={(e) => setArticleContent(e.target.value)}
+                      onChange={(e) => {
+                        setArticleContent(e.target.value);
+                        clearArticleHoverPreview();
+                      }}
                       onKeyDown={(e) => {
                         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
                           const el = e.currentTarget;
@@ -945,23 +982,64 @@ export default function Admin() {
                         setArticleCtxMenu({
                           x: e.clientX,
                           y: e.clientY,
-                          token: findLinkAtPosition(articleContent, at),
+                          token:
+                            findMarkdownLinkAtClientPoint(el, articleContent, e.clientX, e.clientY) ||
+                            findLinkAtPosition(articleContent, at),
                           start: el.selectionStart,
                           end: el.selectionEnd,
                         });
+                        clearArticleHoverPreview();
                       }}
+                      onMouseMove={(e) => {
+                        const token = findMarkdownLinkAtClientPoint(e.currentTarget, articleContent, e.clientX, e.clientY);
+                        if (!token) {
+                          clearArticleHoverPreview();
+                          return;
+                        }
+
+                        const tokenKey = `${token.start}:${token.end}:${token.href}`;
+                        articleHoverPointRef.current = { x: e.clientX, y: e.clientY };
+
+                        if (tokenKey === articleHoverTokenKeyRef.current) {
+                          if (articleHoverPreview) {
+                            setArticleHoverPreview((prev) =>
+                              prev ? { ...prev, x: e.clientX, y: e.clientY } : prev
+                            );
+                          }
+                          return;
+                        }
+
+                        if (articleHoverTimerRef.current) {
+                          window.clearTimeout(articleHoverTimerRef.current);
+                          articleHoverTimerRef.current = null;
+                        }
+
+                        articleHoverTokenKeyRef.current = tokenKey;
+                        setArticleHoverPreview(null);
+                        const nextPreview = buildArticleHoverPreview(token);
+                        articleHoverTimerRef.current = window.setTimeout(() => {
+                          setArticleHoverPreview({
+                            ...nextPreview,
+                            x: articleHoverPointRef.current.x,
+                            y: articleHoverPointRef.current.y,
+                          });
+                          articleHoverTimerRef.current = null;
+                        }, 1000);
+                      }}
+                      onMouseLeave={clearArticleHoverPreview}
+                      onScroll={clearArticleHoverPreview}
                       data-link-editor="true"
                       className="mt-2 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
                       placeholder="Use plain text for now."
                     />
-                  </div>
-
-                  <div className="rounded-lg border border-slate-700/70 bg-slate-950/60 p-3">
-                    <div className="mb-2 text-xs uppercase tracking-wide text-slate-400">Live Preview</div>
-                    <LinkedContent
-                      content={articleContent}
-                      resolveMeta={resolveHelpMeta}
-                      resolveHelpHref={resolveHelpHref}
+                    <LinkHoverPreview
+                      visible={!!articleHoverPreview}
+                      x={articleHoverPreview?.x || 0}
+                      y={articleHoverPreview?.y || 0}
+                      title={articleHoverPreview?.title || ""}
+                      subtitle={articleHoverPreview?.subtitle}
+                      warning={articleHoverPreview?.warning}
+                      actionHint={articleHoverPreview?.actionHint}
                     />
                   </div>
 

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 type EditorContextMenuProps = {
   open: boolean;
@@ -39,14 +40,19 @@ export function EditorContextMenu({
 
   if (!open) return null;
 
+  const menuWidth = 176;
+  const menuHeight = 124;
+  const clampedX = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8));
+  const clampedY = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8));
+
   const menuButtonClass =
     'w-full text-left rounded-lg px-3 py-2 text-sm transition-colors hover:bg-slate-900/70 text-slate-200';
   const disabledClass = 'w-full text-left rounded-lg px-3 py-2 text-sm text-slate-500 cursor-not-allowed';
 
-  return (
+  return createPortal(
     <div
       className="fixed z-[80] w-44 rounded-xl border border-slate-700/70 bg-slate-950/98 p-1.5 shadow-2xl"
-      style={{ left: x, top: y }}
+      style={{ left: clampedX, top: clampedY }}
       onClick={(e) => e.stopPropagation()}
     >
       <button
@@ -80,6 +86,7 @@ export function EditorContextMenu({
       >
         Remove Link
       </button>
-    </div>
+    </div>,
+    document.body,
   );
 }

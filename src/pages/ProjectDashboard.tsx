@@ -35,7 +35,6 @@ import { FileTreePanel } from '../projectFiles/FileTreePanel';
 import { DocEditor } from '../projectFiles/DocEditor';
 import { NameModal } from '../projectFiles/NameModal';
 import { ContextMenu, ContextMenuItem } from '../projectFiles/ContextMenu';
-import type { ParsedMarkdownLink } from '../lib/linking';
 
 type Tab = 'overview' | 'board' | 'planner' | 'files' | 'resources';
 
@@ -397,53 +396,6 @@ export function ProjectDashboard({
     () => nodes.find((n) => n.id === selectedId && n.type === 'doc') || null,
     [nodes, selectedId],
   );
-
-  const handleDocInternalLink = useCallback((link: ParsedMarkdownLink) => {
-    if (!link.target) return;
-    if (link.target.type === 'external' || link.target.type === 'help') return;
-    if (projectId && link.target.projectId !== projectId) return;
-
-    if (link.target.type === 'project_file') {
-      setTab('files');
-      setBranchOpen(true);
-      setHighlightFileNodeId(link.target.targetId);
-      setHighlightResourceId(null);
-      setHighlightStepId(null);
-      setHighlightCardId(null);
-
-      const targetNode = nodes.find((node) => node.id === link.target.targetId);
-      if (targetNode?.type === 'doc') {
-        setSelectedId(targetNode.id);
-      } else if (targetNode?.type === 'upload' && targetNode.meta?.url) {
-        window.open(String(targetNode.meta.url), '_blank', 'noopener,noreferrer');
-      }
-      return;
-    }
-
-    if (link.target.type === 'project_resource') {
-      setTab('resources');
-      setHighlightResourceId(link.target.targetId);
-      setHighlightStepId(null);
-      setHighlightCardId(null);
-      setHighlightFileNodeId(null);
-      return;
-    }
-
-    if (link.target.type === 'project_planner') {
-      setTab('planner');
-      setHighlightStepId(link.target.targetId);
-      setHighlightCardId(null);
-      setHighlightResourceId(null);
-      setHighlightFileNodeId(null);
-      return;
-    }
-
-    setTab('board');
-    setHighlightCardId(link.target.targetId);
-    setHighlightStepId(null);
-    setHighlightResourceId(null);
-    setHighlightFileNodeId(null);
-  }, [nodes, projectId]);
 
   const folderChoices = useMemo(() => buildFolderChoices(nodes), [nodes]);
   const selectedQuickNotePath = useMemo(() => {
@@ -1337,7 +1289,6 @@ export function ProjectDashboard({
                             prev ? { ...prev, updated_at: new Date().toISOString() } : prev,
                           );
                         }}
-                        onActivateInternalLink={handleDocInternalLink}
                       />
                     ) : (
                       <div className="rounded-3xl border border-slate-800/60 bg-slate-950/70 p-6">

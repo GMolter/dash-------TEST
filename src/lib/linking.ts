@@ -157,3 +157,74 @@ export function replaceSelectionWithLink(
 export function removeMarkdownLink(content: string, link: ParsedMarkdownLink): string {
   return replaceContentRange(content, link.start, link.end, link.label);
 }
+
+function rectContainsPoint(rect: DOMRect, x: number, y: number) {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function copyTextareaStyles(textarea: HTMLTextAreaElement, mirror: HTMLDivElement) {
+  const cs = window.getComputedStyle(textarea);
+  mirror.style.position = 'fixed';
+  mirror.style.left = `${textarea.getBoundingClientRect().left}px`;
+  mirror.style.top = `${textarea.getBoundingClientRect().top}px`;
+  mirror.style.width = `${textarea.clientWidth}px`;
+  mirror.style.height = `${textarea.clientHeight}px`;
+  mirror.style.boxSizing = 'border-box';
+  mirror.style.padding = cs.padding;
+  mirror.style.border = cs.border;
+  mirror.style.fontFamily = cs.fontFamily;
+  mirror.style.fontSize = cs.fontSize;
+  mirror.style.fontWeight = cs.fontWeight;
+  mirror.style.lineHeight = cs.lineHeight;
+  mirror.style.letterSpacing = cs.letterSpacing;
+  mirror.style.textTransform = cs.textTransform;
+  mirror.style.textIndent = cs.textIndent;
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordBreak = 'break-word';
+  mirror.style.overflowWrap = 'anywhere';
+  mirror.style.overflow = 'hidden';
+  mirror.style.visibility = 'hidden';
+  mirror.style.pointerEvents = 'none';
+  mirror.style.zIndex = '-1';
+  mirror.style.background = 'transparent';
+  mirror.style.color = 'transparent';
+}
+
+export function findMarkdownLinkAtClientPoint(
+  textarea: HTMLTextAreaElement,
+  content: string,
+  clientX: number,
+  clientY: number,
+): ParsedMarkdownLink | null {
+  if (typeof document === 'undefined') return null;
+  const segments = parseMarkdownLinks(content);
+  const links = segments
+    .filter((segment): segment is { kind: 'link'; link: ParsedMarkdownLink } => segment.kind === 'link')
+    .map((segment) => segment.link);
+  if (!links.length) return null;
+
+  for (const link of links) {
+    const mirror = document.createElement('div');
+    copyTextareaStyles(textarea, mirror);
+
+    const before = document.createTextNode(content.slice(0, link.start));
+    const token = document.createElement('span');
+    token.textContent = content.slice(link.start, link.end);
+    const after = document.createTextNode(content.slice(link.end));
+
+    mirror.append(before, token, after);
+    document.body.appendChild(mirror);
+
+    mirror.scrollTop = textarea.scrollTop;
+    mirror.scrollLeft = textarea.scrollLeft;
+
+    const rects = Array.from(token.getClientRects());
+    document.body.removeChild(mirror);
+
+    if (rects.some((rect) => rectContainsPoint(rect, clientX, clientY))) {
+      return link;
+    }
+  }
+
+  return null;
+}

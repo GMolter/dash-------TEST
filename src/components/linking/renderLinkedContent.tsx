@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ParsedMarkdownLink } from '../../lib/linking';
 import { parseMarkdownLinks } from '../../lib/linking';
 import { LinkHoverPreview } from './LinkHoverPreview';
@@ -40,6 +40,26 @@ export function LinkedContent({
 }: LinkedContentProps) {
   const segments = useMemo(() => parseMarkdownLinks(content || ''), [content]);
   const [hover, setHover] = useState<HoverState | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+
+  const queueHoverPreview = (state: HoverState) => {
+    if (hoverTimerRef.current) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    hoverTimerRef.current = window.setTimeout(() => {
+      setHover(state);
+      hoverTimerRef.current = null;
+    }, 1000);
+  };
+
+  const clearHoverPreview = () => {
+    if (hoverTimerRef.current) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHover(null);
+  };
 
   return (
     <>
@@ -70,25 +90,27 @@ export function LinkedContent({
               ? 'Click to jump and highlight'
               : 'Opens in new tab';
 
-          const onMouseMove = (e: React.MouseEvent) => {
-            setHover({
-              x: e.clientX,
-              y: e.clientY,
-              title: meta.title || link.label,
-              subtitle: meta.subtitle,
-              warning: meta.warning,
-              actionHint,
-            });
-          };
+          const hoverStateFromEvent = (e: React.MouseEvent): HoverState => ({
+            x: e.clientX,
+            y: e.clientY,
+            title: meta.title || link.label,
+            subtitle: meta.subtitle,
+            warning: meta.warning,
+            actionHint,
+          });
 
           if (isInternal) {
             return (
               <button
                 key={`link-${idx}`}
                 type="button"
-                onMouseEnter={onMouseMove}
-                onMouseMove={onMouseMove}
-                onMouseLeave={() => setHover(null)}
+                onMouseEnter={(e) => queueHoverPreview(hoverStateFromEvent(e))}
+                onMouseMove={(e) => {
+                  if (hover) {
+                    setHover((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+                  }
+                }}
+                onMouseLeave={clearHoverPreview}
                 onClick={() => {
                   if (isMissing) return;
                   onActivateInternalLink?.(link);
@@ -109,9 +131,13 @@ export function LinkedContent({
             <button
               key={`link-${idx}`}
               type="button"
-              onMouseEnter={onMouseMove}
-              onMouseMove={onMouseMove}
-              onMouseLeave={() => setHover(null)}
+              onMouseEnter={(e) => queueHoverPreview(hoverStateFromEvent(e))}
+              onMouseMove={(e) => {
+                if (hover) {
+                  setHover((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+                }
+              }}
+              onMouseLeave={clearHoverPreview}
               onClick={() => {
                 if (link.target?.type === 'external') {
                   window.open(link.target.url, '_blank', 'noopener,noreferrer');

@@ -89,7 +89,7 @@ export function LinkPickerModal({
     if (initialTarget?.type === 'external') {
       setExternalUrl(initialTarget.url || '');
     }
-  }, [open, allowedTabs, options, initialLabel, initialTarget]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -107,7 +107,7 @@ export function LinkPickerModal({
     return list.filter((item) => `${item.title} ${item.subtitle || ''} ${item.badge || ''}`.toLowerCase().includes(q));
   }, [options, activeTab, query]);
 
-  const selectedOption = filteredOptions.find((item) => item.id === selectedOptionId) || null;
+  const selectedOption = options.find((item) => item.id === selectedOptionId) || null;
 
   if (!open) return null;
 
