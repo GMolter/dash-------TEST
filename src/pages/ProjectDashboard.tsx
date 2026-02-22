@@ -35,6 +35,7 @@ import { FileTreePanel } from '../projectFiles/FileTreePanel';
 import { DocEditor } from '../projectFiles/DocEditor';
 import { NameModal } from '../projectFiles/NameModal';
 import { ContextMenu, ContextMenuItem } from '../projectFiles/ContextMenu';
+import type { ParsedMarkdownLink } from '../lib/linking';
 
 type Tab = 'overview' | 'board' | 'planner' | 'files' | 'resources';
 
@@ -145,13 +146,6 @@ function statusPill(status: string) {
   }
 }
 
-function stopIfEditableTarget(e: KeyboardEvent) {
-  const el = e.target as HTMLElement | null;
-  if (!el) return false;
-  const tag = el.tagName.toLowerCase();
-  return tag === 'input' || tag === 'textarea' || el.isContentEditable;
-}
-
 function navigateTo(path: string) {
   window.history.pushState({}, '', path);
   window.dispatchEvent(new PopStateEvent('popstate'));
@@ -241,7 +235,13 @@ export function ProjectDashboard({
   const [plannerFocusSignal, setPlannerFocusSignal] = useState(0);
   const [plannerGenerateSignal, setPlannerGenerateSignal] = useState(0);
   const [highlightResourceId, setHighlightResourceId] = useState<string | null>(null);
+  const [highlightCardId, setHighlightCardId] = useState<string | null>(null);
+  const [highlightStepId, setHighlightStepId] = useState<string | null>(null);
+  const [highlightFileNodeId, setHighlightFileNodeId] = useState<string | null>(null);
   const handleHighlightConsumed = useCallback(() => setHighlightResourceId(null), []);
+  const handleBoardHighlightConsumed = useCallback(() => setHighlightCardId(null), []);
+  const handlePlannerHighlightConsumed = useCallback(() => setHighlightStepId(null), []);
+  const handleFileHighlightConsumed = useCallback(() => setHighlightFileNodeId(null), []);
 
   function navigateProjectTab(nextTab: Tab) {
     setTab(nextTab);
@@ -373,10 +373,11 @@ export function ProjectDashboard({
   const projectSearchRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        if (stopIfEditableTarget(e)) return;
         e.preventDefault();
         projectSearchRef.current?.focus();
+        setSearchOpen(true);
       }
       if (e.key === 'Escape') {
         setQcOpen(false);
@@ -396,6 +397,53 @@ export function ProjectDashboard({
     () => nodes.find((n) => n.id === selectedId && n.type === 'doc') || null,
     [nodes, selectedId],
   );
+
+  const handleDocInternalLink = useCallback((link: ParsedMarkdownLink) => {
+    if (!link.target) return;
+    if (link.target.type === 'external' || link.target.type === 'help') return;
+    if (projectId && link.target.projectId !== projectId) return;
+
+    if (link.target.type === 'project_file') {
+      setTab('files');
+      setBranchOpen(true);
+      setHighlightFileNodeId(link.target.targetId);
+      setHighlightResourceId(null);
+      setHighlightStepId(null);
+      setHighlightCardId(null);
+
+      const targetNode = nodes.find((node) => node.id === link.target.targetId);
+      if (targetNode?.type === 'doc') {
+        setSelectedId(targetNode.id);
+      } else if (targetNode?.type === 'upload' && targetNode.meta?.url) {
+        window.open(String(targetNode.meta.url), '_blank', 'noopener,noreferrer');
+      }
+      return;
+    }
+
+    if (link.target.type === 'project_resource') {
+      setTab('resources');
+      setHighlightResourceId(link.target.targetId);
+      setHighlightStepId(null);
+      setHighlightCardId(null);
+      setHighlightFileNodeId(null);
+      return;
+    }
+
+    if (link.target.type === 'project_planner') {
+      setTab('planner');
+      setHighlightStepId(link.target.targetId);
+      setHighlightCardId(null);
+      setHighlightResourceId(null);
+      setHighlightFileNodeId(null);
+      return;
+    }
+
+    setTab('board');
+    setHighlightCardId(link.target.targetId);
+    setHighlightStepId(null);
+    setHighlightResourceId(null);
+    setHighlightFileNodeId(null);
+  }, [nodes, projectId]);
 
   const folderChoices = useMemo(() => buildFolderChoices(nodes), [nodes]);
   const selectedQuickNotePath = useMemo(() => {
@@ -1187,6 +1235,8 @@ export function ProjectDashboard({
                       storageKey={`project-files-open:${projectId || 'unknown'}`}
                       nodes={nodes}
                       selectedId={selectedId}
+                      highlightNodeId={highlightFileNodeId}
+                      onHighlightConsumed={handleFileHighlightConsumed}
                       onSelect={(id) => setSelectedId(id)}
                       onRequestNewDoc={(parentId) => {
                         setNameModalMode('doc');
@@ -1221,12 +1271,20 @@ export function ProjectDashboard({
                   onOpenGeneratePlan={openPlannerGenerateModal}
                 />
               )}
-              {tab === 'board' && projectId && <BoardView projectId={projectId} />}
+              {tab === 'board' && projectId && (
+                <BoardView
+                  projectId={projectId}
+                  highlightCardId={highlightCardId}
+                  onHighlightConsumed={handleBoardHighlightConsumed}
+                />
+              )}
               {tab === 'planner' && projectId && (
                 <PlannerView
                   projectId={projectId}
                   focusNewTaskSignal={plannerFocusSignal}
                   openGenerateSignal={plannerGenerateSignal}
+                  highlightStepId={highlightStepId}
+                  onHighlightConsumed={handlePlannerHighlightConsumed}
                   onAiUsageUpdate={(usage) => {
                     setProject((prev) =>
                       prev
@@ -1279,6 +1337,7 @@ export function ProjectDashboard({
                             prev ? { ...prev, updated_at: new Date().toISOString() } : prev,
                           );
                         }}
+                        onActivateInternalLink={handleDocInternalLink}
                       />
                     ) : (
                       <div className="rounded-3xl border border-slate-800/60 bg-slate-950/70 p-6">

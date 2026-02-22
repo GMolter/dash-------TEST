@@ -106,11 +106,15 @@ export function PlannerView({
   focusNewTaskSignal = 0,
   openGenerateSignal = 0,
   onAiUsageUpdate,
+  highlightStepId,
+  onHighlightConsumed,
 }: {
   projectId: string;
   focusNewTaskSignal?: number;
   openGenerateSignal?: number;
   onAiUsageUpdate?: (usage: PlannerUsage) => void;
+  highlightStepId?: string | null;
+  onHighlightConsumed?: () => void;
 }) {
   const [steps, setSteps] = useState<PlannerStep[]>([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -127,6 +131,7 @@ export function PlannerView({
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const [showDescriptionInput, setShowDescriptionInput] = useState(false);
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
   const lastGenerateSignalRef = useRef(openGenerateSignal);
 
@@ -163,6 +168,26 @@ export function PlannerView({
     lastGenerateSignalRef.current = openGenerateSignal;
     setAiModalOpen(true);
   }, [openGenerateSignal]);
+
+  useEffect(() => {
+    if (!highlightStepId) return;
+    setActiveHighlightId(highlightStepId);
+
+    const scrollTimer = window.setTimeout(() => {
+      const el = document.getElementById(`planner-step-${highlightStepId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+
+    const clearTimer = window.setTimeout(() => {
+      setActiveHighlightId(null);
+      onHighlightConsumed?.();
+    }, 2800);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [highlightStepId, steps.length, onHighlightConsumed]);
 
   const filteredSteps = useMemo(
     () => (showArchived ? steps : steps.filter((s) => !s.archived)),
@@ -690,6 +715,7 @@ export function PlannerView({
                 }
                 toggleSingleSelection(id);
               }}
+              highlighted={activeHighlightId === step.id}
             />
           ))
         )}
@@ -724,6 +750,7 @@ function StepCard({
   onDelete,
   onRowClick,
   onToggleSelected,
+  highlighted,
 }: {
   step: PlannerStep;
   index: number;
@@ -740,6 +767,7 @@ function StepCard({
   onDelete: (id: string) => void;
   onRowClick: (id: string, e: React.MouseEvent) => void;
   onToggleSelected: (id: string, mode: 'toggle' | 'range') => void;
+  highlighted: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -762,6 +790,7 @@ function StepCard({
 
   return (
     <div
+      id={`planner-step-${step.id}`}
       draggable={!step.archived}
       onClick={(e) => {
         const target = e.target as HTMLElement | null;
@@ -792,7 +821,7 @@ function StepCard({
           : isDragOver
             ? 'bg-blue-500/10 border-blue-500/40'
             : 'bg-slate-950/60 border-slate-800/60 hover:border-slate-700/70'
-      }`}
+      } ${highlighted ? 'ring-2 ring-cyan-400/45 border-cyan-400/55' : ''}`}
     >
       <div className="p-4 flex items-start gap-3">
         <div className="mt-0.5 text-slate-500 cursor-grab">

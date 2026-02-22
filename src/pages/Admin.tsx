@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../lib/supabase";
 import {
   LayoutDashboard,
@@ -13,7 +13,14 @@ import {
   Plus,
   Trash2,
   HelpCircle,
+  Link2,
 } from "lucide-react";
+import type { LinkPickerOption, LinkResolvedMeta } from "../components/linking/types";
+import { LinkPickerModal } from "../components/linking/LinkPickerModal";
+import { EditorContextMenu } from "../components/linking/EditorContextMenu";
+import { LinkedContent } from "../components/linking/renderLinkedContent";
+import type { LinkTarget, ParsedMarkdownLink } from "../lib/linking";
+import { findLinkAtPosition, removeMarkdownLink, replaceSelectionWithLink } from "../lib/linking";
 
 type BannerState = {
   enabled: boolean;
@@ -33,6 +40,20 @@ type HelpArticle = {
   sort_order: number;
   created_at: string;
   updated_at: string;
+};
+
+type LinkDraftRange = {
+  start: number;
+  end: number;
+  initialTarget: LinkTarget | null;
+};
+
+type ContextMenuState = {
+  x: number;
+  y: number;
+  token: ParsedMarkdownLink | null;
+  start: number;
+  end: number;
 };
 
 function slugify(input: string) {
@@ -75,8 +96,13 @@ export default function Admin() {
   const [articlePublished, setArticlePublished] = useState(false);
   const [articleSortOrder, setArticleSortOrder] = useState(0);
   const [articleFilter, setArticleFilter] = useState<ArticleFilter>("all");
+  const [articleLinkPickerOpen, setArticleLinkPickerOpen] = useState(false);
+  const [articleLinkInitialLabel, setArticleLinkInitialLabel] = useState("");
+  const [articlePendingRange, setArticlePendingRange] = useState<LinkDraftRange | null>(null);
+  const [articleCtxMenu, setArticleCtxMenu] = useState<ContextMenuState | null>(null);
 
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const articleTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const canSaveBanner = useMemo(() => {
     if (!banner.enabled) return true;
@@ -92,6 +118,72 @@ export default function Admin() {
     if (articleFilter === "drafts") return articles.filter((a) => !a.is_published);
     return articles;
   }, [articles, articleFilter]);
+
+  const helpLinkOptions = useMemo<LinkPickerOption[]>(
+    () =>
+      articles.map((article) => ({
+        id: `help-${article.id}`,
+        tab: "help",
+        title: article.title,
+        subtitle: `/help/article/${article.slug}`,
+        badge: article.is_published ? "Published" : "Draft",
+        warning: article.is_published
+          ? undefined
+          : "Draft links may 404 publicly until published.",
+        target: { type: "help", articleId: article.id },
+      })),
+    [articles]
+  );
+
+  const resolveHelpHref = useMemo(() => {
+    const byId = new Map(articles.map((article) => [article.id, article]));
+    return (articleId: string) => {
+      const article = byId.get(articleId);
+      if (!article) return "/help";
+      return `/help/article/${article.slug}`;
+    };
+  }, [articles]);
+
+  const resolveHelpMeta = useMemo(() => {
+    const byId = new Map(articles.map((article) => [article.id, article]));
+    return (link: ParsedMarkdownLink): LinkResolvedMeta => {
+      if (!link.target) {
+        return { exists: false, title: link.label, subtitle: "Invalid link" };
+      }
+      if (link.target.type === "external") {
+        return { exists: true, title: link.label, subtitle: link.target.url };
+      }
+      if (link.target.type === "help") {
+        const article = byId.get(link.target.articleId);
+        if (!article) {
+          return {
+            exists: false,
+            title: link.label,
+            subtitle: "Help article unavailable",
+            warning: "This target may have been deleted or you no longer have access.",
+          };
+        }
+        return {
+          exists: true,
+          title: article.title,
+          subtitle: article.is_published ? "Published help article" : "Draft help article",
+          warning: article.is_published ? undefined : "Draft links may 404 publicly until published.",
+        };
+      }
+      return {
+        exists: false,
+        title: link.label,
+        subtitle: "Unsupported target for help editor",
+      };
+    };
+  }, [articles]);
+
+  function openArticleLinkPicker(start: number, end: number, initialTarget: LinkTarget | null) {
+    const selection = start !== end ? articleContent.slice(start, end) : "";
+    setArticlePendingRange({ start, end, initialTarget });
+    setArticleLinkInitialLabel(selection);
+    setArticleLinkPickerOpen(true);
+  }
 
   async function adminFetch(url: string, init?: RequestInit) {
     const { data } = await supabase.auth.getSession();
@@ -818,12 +910,58 @@ export default function Admin() {
 
                   <div>
                     <label className="block text-sm text-slate-300">Content</label>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const el = articleTextareaRef.current;
+                          if (!el) return;
+                          openArticleLinkPicker(el.selectionStart, el.selectionEnd, null);
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/35 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100 hover:bg-blue-500/20"
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                        Insert Link
+                      </button>
+                      <div className="text-xs text-slate-400">Ctrl/Cmd+K inserts link when text is selected.</div>
+                    </div>
                     <textarea
+                      ref={articleTextareaRef}
                       rows={14}
                       value={articleContent}
                       onChange={(e) => setArticleContent(e.target.value)}
-                      className="mt-1 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
+                      onKeyDown={(e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+                          const el = e.currentTarget;
+                          if (el.selectionStart !== el.selectionEnd) {
+                            e.preventDefault();
+                            openArticleLinkPicker(el.selectionStart, el.selectionEnd, null);
+                          }
+                        }
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        const el = e.currentTarget;
+                        const at = el.selectionStart === el.selectionEnd ? Math.max(0, el.selectionStart - 1) : el.selectionStart;
+                        setArticleCtxMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          token: findLinkAtPosition(articleContent, at),
+                          start: el.selectionStart,
+                          end: el.selectionEnd,
+                        });
+                      }}
+                      data-link-editor="true"
+                      className="mt-2 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
                       placeholder="Use plain text for now."
+                    />
+                  </div>
+
+                  <div className="rounded-lg border border-slate-700/70 bg-slate-950/60 p-3">
+                    <div className="mb-2 text-xs uppercase tracking-wide text-slate-400">Live Preview</div>
+                    <LinkedContent
+                      content={articleContent}
+                      resolveMeta={resolveHelpMeta}
+                      resolveHelpHref={resolveHelpHref}
                     />
                   </div>
 
@@ -858,6 +996,63 @@ export default function Admin() {
                       </button>
                     </div>
                   </div>
+
+                  <EditorContextMenu
+                    open={!!articleCtxMenu}
+                    x={articleCtxMenu?.x || 0}
+                    y={articleCtxMenu?.y || 0}
+                    canEdit={!!articleCtxMenu?.token?.target}
+                    canRemove={!!articleCtxMenu?.token}
+                    onClose={() => setArticleCtxMenu(null)}
+                    onInsert={() => {
+                      if (!articleCtxMenu) return;
+                      openArticleLinkPicker(articleCtxMenu.start, articleCtxMenu.end, null);
+                    }}
+                    onEdit={() => {
+                      if (!articleCtxMenu?.token?.target) return;
+                      setArticlePendingRange({
+                        start: articleCtxMenu.token.start,
+                        end: articleCtxMenu.token.end,
+                        initialTarget: articleCtxMenu.token.target,
+                      });
+                      setArticleLinkInitialLabel(articleCtxMenu.token.label);
+                      setArticleLinkPickerOpen(true);
+                    }}
+                    onRemove={() => {
+                      if (!articleCtxMenu?.token) return;
+                      const next = removeMarkdownLink(articleContent, articleCtxMenu.token);
+                      setArticleContent(next);
+                    }}
+                  />
+
+                  <LinkPickerModal
+                    open={articleLinkPickerOpen}
+                    allowedTabs={["external", "help"]}
+                    options={helpLinkOptions}
+                    initialLabel={articleLinkInitialLabel}
+                    initialTarget={articlePendingRange?.initialTarget || null}
+                    onClose={() => {
+                      setArticleLinkPickerOpen(false);
+                      setArticlePendingRange(null);
+                    }}
+                    onSubmit={({ label, target }) => {
+                      if (!articlePendingRange) return;
+                      const result = replaceSelectionWithLink(
+                        articleContent,
+                        articlePendingRange.start,
+                        articlePendingRange.end,
+                        label,
+                        target
+                      );
+                      setArticleContent(result.nextContent);
+                      setArticleLinkPickerOpen(false);
+                      setArticlePendingRange(null);
+                      window.requestAnimationFrame(() => {
+                        articleTextareaRef.current?.focus();
+                        articleTextareaRef.current?.setSelectionRange(result.nextCursor, result.nextCursor);
+                      });
+                    }}
+                  />
                 </div>
               </section>
             )}

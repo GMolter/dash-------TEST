@@ -34,6 +34,8 @@ export function FileTreePanel({
   storageKey,
   nodes,
   selectedId,
+  highlightNodeId,
+  onHighlightConsumed,
   onSelect,
   onRequestNewDoc,
   onRequestNewFolder,
@@ -43,6 +45,8 @@ export function FileTreePanel({
   storageKey: string;
   nodes: FileNode[];
   selectedId: string | null;
+  highlightNodeId?: string | null;
+  onHighlightConsumed?: () => void;
   onSelect: (id: string) => void;
   onRequestNewDoc: (parentId: string | null) => void;
   onRequestNewFolder: (parentId: string | null) => void;
@@ -50,6 +54,7 @@ export function FileTreePanel({
   onContextMenu: (nodeId: string, x: number, y: number) => void;
 }) {
   const tree = useMemo(() => buildTree(nodes), [nodes]);
+  const [activeHighlightNodeId, setActiveHighlightNodeId] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -81,6 +86,38 @@ export function FileTreePanel({
     }
   }, [storageKey]);
 
+  useEffect(() => {
+    if (!highlightNodeId) return;
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+
+    setOpen((prev) => {
+      const next = { ...prev };
+      let cursor = byId.get(highlightNodeId) || null;
+      while (cursor?.parent_id) {
+        next[cursor.parent_id] = true;
+        cursor = byId.get(cursor.parent_id) || null;
+      }
+      return next;
+    });
+
+    setActiveHighlightNodeId(highlightNodeId);
+
+    const scrollTimer = window.setTimeout(() => {
+      const el = document.getElementById(`file-node-${highlightNodeId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 90);
+
+    const clearTimer = window.setTimeout(() => {
+      setActiveHighlightNodeId(null);
+      onHighlightConsumed?.();
+    }, 2800);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [highlightNodeId, nodes, onHighlightConsumed]);
+
   const toggle = (id: string) => setOpen((m) => ({ ...m, [id]: !m[id] }));
   const isOpen = (id: string) => open[id] ?? false;
 
@@ -92,6 +129,7 @@ export function FileTreePanel({
         isOpen={isOpen}
         onToggle={toggle}
         selectedId={selectedId}
+        highlightNodeId={activeHighlightNodeId}
         onSelect={onSelect}
         onRequestNewDoc={onRequestNewDoc}
         onRequestNewFolder={onRequestNewFolder}
@@ -108,6 +146,7 @@ function TreeList({
   isOpen,
   onToggle,
   selectedId,
+  highlightNodeId,
   onSelect,
   onRequestNewDoc,
   onRequestNewFolder,
@@ -119,6 +158,7 @@ function TreeList({
   isOpen: (id: string) => boolean;
   onToggle: (id: string) => void;
   selectedId: string | null;
+  highlightNodeId: string | null;
   onSelect: (id: string) => void;
   onRequestNewDoc: (parentId: string | null) => void;
   onRequestNewFolder: (parentId: string | null) => void;
@@ -129,6 +169,7 @@ function TreeList({
     <div className="space-y-1">
       {items.map((n) => {
         const selected = n.id === selectedId;
+        const highlighted = n.id === highlightNodeId;
         const open = n.type === 'folder' ? isOpen(n.id) : false;
         const padding = 10 + level * 14;
 
@@ -147,11 +188,12 @@ function TreeList({
         return (
           <div key={n.id}>
             <div
+              id={`file-node-${n.id}`}
               className={`group flex items-center gap-2 rounded-2xl border transition-colors ${
                 selected
                   ? 'bg-blue-500/18 border-blue-500/30'
                   : 'bg-slate-950/10 border-slate-800/50 hover:bg-slate-900/35'
-              }`}
+              } ${highlighted ? 'ring-2 ring-cyan-400/45 border-cyan-400/55' : ''}`}
               style={{ paddingLeft: padding }}
               draggable
               onDragStart={(e) => {
@@ -235,6 +277,7 @@ function TreeList({
                   isOpen={isOpen}
                   onToggle={onToggle}
                   selectedId={selectedId}
+                  highlightNodeId={highlightNodeId}
                   onSelect={onSelect}
                   onRequestNewDoc={onRequestNewDoc}
                   onRequestNewFolder={onRequestNewFolder}

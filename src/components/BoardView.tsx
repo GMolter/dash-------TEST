@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -33,7 +33,15 @@ function isCompletedLaneName(columnName: string) {
   return v.includes('done') || v.includes('complete');
 }
 
-export function BoardView({ projectId }: { projectId: string }) {
+export function BoardView({
+  projectId,
+  highlightCardId,
+  onHighlightConsumed,
+}: {
+  projectId: string;
+  highlightCardId?: string | null;
+  onHighlightConsumed?: () => void;
+}) {
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [cards, setCards] = useState<BoardCard[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +49,7 @@ export function BoardView({ projectId }: { projectId: string }) {
   const [selectedCard, setSelectedCard] = useState<BoardCard | null>(null);
   const [addingLane, setAddingLane] = useState(false);
   const [newLaneName, setNewLaneName] = useState('');
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(null);
 
   async function loadBoard() {
     const [colsRes, cardsRes] = await Promise.all([
@@ -123,6 +132,26 @@ export function BoardView({ projectId }: { projectId: string }) {
   useEffect(() => {
     loadBoard();
   }, [projectId]);
+
+  useEffect(() => {
+    if (!highlightCardId) return;
+    setActiveHighlightId(highlightCardId);
+
+    const scrollTimer = window.setTimeout(() => {
+      const el = document.getElementById(`board-card-${highlightCardId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+    }, 80);
+
+    const clearTimer = window.setTimeout(() => {
+      setActiveHighlightId(null);
+      onHighlightConsumed?.();
+    }, 2800);
+
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [highlightCardId, cards.length, onHighlightConsumed]);
 
   async function createCard(columnId: string, title: string) {
     const { data } = await supabase
@@ -282,6 +311,7 @@ export function BoardView({ projectId }: { projectId: string }) {
               onDragOver={handleDragOver}
               onDrop={handleDrop}
               onCardClick={setSelectedCard}
+              highlightCardId={activeHighlightId}
             />
           ))}
         </div>
@@ -314,6 +344,7 @@ function BoardColumnView({
   onDragOver,
   onDrop,
   onCardClick,
+  highlightCardId,
 }: {
   column: BoardColumn;
   cards: BoardCard[];
@@ -322,6 +353,7 @@ function BoardColumnView({
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (columnId: string) => void;
   onCardClick: (card: BoardCard) => void;
+  highlightCardId: string | null;
 }) {
   const [addingCard, setAddingCard] = useState(false);
   const [newCardTitle, setNewCardTitle] = useState('');
@@ -364,6 +396,7 @@ function BoardColumnView({
             completedViaLane={isCompletedLaneName(column.name)}
             onDragStart={() => onDragStart(card.id)}
             onClick={() => onCardClick(card)}
+            highlighted={highlightCardId === card.id}
           />
         ))}
 
@@ -413,11 +446,13 @@ function CardItem({
   completedViaLane,
   onDragStart,
   onClick,
+  highlighted,
 }: {
   card: BoardCard;
   completedViaLane: boolean;
   onDragStart: () => void;
   onClick: () => void;
+  highlighted: boolean;
 }) {
   const priorityColors = {
     none: 'border-slate-700/50',
@@ -436,6 +471,7 @@ function CardItem({
 
   return (
     <div
+      id={`board-card-${card.id}`}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = 'move';
@@ -444,7 +480,9 @@ function CardItem({
       onClick={onClick}
       className={`rounded-xl border ${
         isCompleted ? 'border-emerald-400/35 bg-emerald-500/10' : `${priorityColors[card.priority]} bg-slate-900/30`
-      } p-3 cursor-pointer hover:bg-slate-900/50 transition-colors`}
+      } p-3 cursor-pointer hover:bg-slate-900/50 transition-colors ${
+        highlighted ? 'ring-2 ring-cyan-400/45 border-cyan-400/55' : ''
+      }`}
     >
       <div className="text-sm font-medium text-slate-100 mb-2">{card.title}</div>
 

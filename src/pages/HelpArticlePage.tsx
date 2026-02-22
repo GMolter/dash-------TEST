@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, FileText, Home } from 'lucide-react';
+import { LinkedContent } from '../components/linking/renderLinkedContent';
+import type { LinkResolvedMeta } from '../components/linking/types';
+import type { ParsedMarkdownLink } from '../lib/linking';
 
 type Article = {
   id: string;
@@ -10,13 +13,21 @@ type Article = {
   updated_at: string;
 };
 
+type HelpLinkRef = {
+  id: string;
+  slug: string;
+  title: string;
+};
+
 export function HelpArticlePage({ slug }: { slug: string }) {
   const [article, setArticle] = useState<Article | null>(null);
+  const [helpRefs, setHelpRefs] = useState<HelpLinkRef[]>([]);
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+    setMissing(false);
 
     async function load() {
       try {
@@ -26,7 +37,12 @@ export function HelpArticlePage({ slug }: { slug: string }) {
           return;
         }
         const j = await r.json();
-        if (!cancelled) setArticle(j.article || null);
+        const refsRes = await fetch('/api/public/help-articles', { cache: 'no-store' });
+        const refsJson = await refsRes.json().catch(() => ({}));
+        if (!cancelled) {
+          setArticle(j.article || null);
+          setHelpRefs(Array.isArray(refsJson.articles) ? (refsJson.articles as HelpLinkRef[]) : []);
+        }
       } catch {
         if (!cancelled) setMissing(true);
       } finally {
@@ -39,6 +55,51 @@ export function HelpArticlePage({ slug }: { slug: string }) {
       cancelled = true;
     };
   }, [slug]);
+
+  const resolveHelpHref = useMemo(() => {
+    const byId = new Map(helpRefs.map((item) => [item.id, item]));
+    return (articleId: string) => {
+      const hit = byId.get(articleId);
+      if (!hit) return '/help';
+      return `/help/article/${hit.slug}`;
+    };
+  }, [helpRefs]);
+
+  const resolveMeta = useMemo(() => {
+    const byId = new Map(helpRefs.map((item) => [item.id, item]));
+    return (link: ParsedMarkdownLink): LinkResolvedMeta => {
+      if (!link.target) {
+        return { exists: false, title: link.label, subtitle: 'Invalid link format' };
+      }
+      if (link.target.type === 'external') {
+        return {
+          exists: true,
+          title: link.label,
+          subtitle: link.target.url,
+        };
+      }
+      if (link.target.type === 'help') {
+        const articleRef = byId.get(link.target.articleId);
+        if (!articleRef) {
+          return {
+            exists: false,
+            title: link.label,
+            subtitle: 'Help article unavailable',
+          };
+        }
+        return {
+          exists: true,
+          title: articleRef.title,
+          subtitle: `/help/article/${articleRef.slug}`,
+        };
+      }
+      return {
+        exists: false,
+        title: link.label,
+        subtitle: 'Project-only reference not available in public help',
+      };
+    };
+  }, [helpRefs]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
@@ -77,9 +138,12 @@ export function HelpArticlePage({ slug }: { slug: string }) {
                 Updated {new Date(article.updated_at).toLocaleString()}
               </div>
               <div className="rounded-xl border border-slate-700/70 bg-slate-950/60 p-4">
-                <pre className="whitespace-pre-wrap text-sm leading-6 text-slate-100 font-sans">
-                  {article.content || 'No content yet.'}
-                </pre>
+                <LinkedContent
+                  content={article.content || 'No content yet.'}
+                  resolveMeta={resolveMeta}
+                  resolveHelpHref={resolveHelpHref}
+                  className="whitespace-pre-wrap text-sm leading-6 text-slate-100 font-sans"
+                />
               </div>
             </div>
           )}
