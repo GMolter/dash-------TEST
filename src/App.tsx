@@ -42,6 +42,7 @@ type View =
   | { type: 'home' }
   | { type: 'utilities' }
   | { type: 'admin' }
+  | { type: 'admin-editor' }
   | { type: 'organization' }
   | { type: 'profile' }
   | { type: 'help' }
@@ -193,6 +194,10 @@ function App() {
       if (cleanPath === '/admin') {
         setView({ type: 'admin' });
         if (window.location.pathname !== '/') window.history.replaceState({}, '', '/');
+        return;
+      }
+      if (cleanPath === '/admin/editor') {
+        setView({ type: 'admin-editor' });
         return;
       }
 
@@ -378,6 +383,10 @@ function App() {
 
   if (view.type === 'help-article') {
     return <HelpArticlePage slug={view.slug} />;
+  }
+
+  if (view.type === 'admin-editor') {
+    return <Admin editorOnly />;
   }
 
   if (isPublicRoute) {

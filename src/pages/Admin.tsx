@@ -19,6 +19,7 @@ import {
   CornerDownLeft,
   Maximize2,
   Minimize2,
+  ArrowLeft,
 } from "lucide-react";
 import type { LinkPickerOption } from "../components/linking/types";
 import { LinkPickerModal } from "../components/linking/LinkPickerModal";
@@ -86,11 +87,15 @@ function slugify(input: string) {
     .slice(0, 80);
 }
 
-export default function Admin() {
+type AdminProps = {
+  editorOnly?: boolean;
+};
+
+export default function Admin({ editorOnly = false }: AdminProps) {
   const [authed, setAuthed] = useState<boolean>(false);
   const [appAdmin, setAppAdmin] = useState(false);
   const [accessReason, setAccessReason] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [activeTab, setActiveTab] = useState<AdminTab>(editorOnly ? "help-docs" : "overview");
 
   const [password, setPassword] = useState("");
   const [loginErr, setLoginErr] = useState<string | null>(null);
@@ -428,6 +433,17 @@ export default function Admin() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!editorOnly) return;
+    setActiveTab("help-docs");
+    setArticleEditorFullscreen(true);
+  }, [editorOnly]);
+
+  function navigateTo(path: string) {
+    window.history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
   async function login(e: React.FormEvent) {
     e.preventDefault();
     setLoginErr(null);
@@ -613,6 +629,8 @@ export default function Admin() {
     return d.toLocaleString();
   }
 
+  const isWideEditorLayout = editorOnly || articleEditorFullscreen;
+
   if (!authed) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
@@ -702,19 +720,32 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
-      <div className="relative z-10 max-w-7xl mx-auto px-6 py-10 space-y-6">
+      <div className={`relative z-10 mx-auto px-6 py-10 space-y-6 ${editorOnly ? "max-w-[1800px]" : "max-w-7xl"}`}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
               <LayoutDashboard className="w-5 h-5 text-blue-300" />
             </div>
             <div>
-              <h1 className="text-2xl font-semibold text-blue-200">App Admin Panel</h1>
-              <p className="text-sm text-slate-400">Platform-level controls and help publishing.</p>
+              <h1 className="text-2xl font-semibold text-blue-200">
+                {editorOnly ? "Help Article Editor" : "App Admin Panel"}
+              </h1>
+              <p className="text-sm text-slate-400">
+                {editorOnly ? "Dedicated editing workspace for help articles." : "Platform-level controls and help publishing."}
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {editorOnly && (
+              <button
+                onClick={() => navigateTo("/admin")}
+                className="inline-flex items-center gap-2 rounded-xl px-3 py-2 bg-slate-900/70 hover:bg-slate-800 border border-slate-700 text-slate-100 transition"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Admin Home
+              </button>
+            )}
             <button
               onClick={() => {
                 loadSettings();
@@ -737,6 +768,7 @@ export default function Admin() {
         </div>
 
         <div className="rounded-2xl border border-slate-700/70 bg-slate-950/45 backdrop-blur">
+          {!editorOnly && (
           <div className="flex flex-wrap gap-2 border-b border-slate-700/70 p-3">
             <button
               onClick={() => setActiveTab("overview")}
@@ -772,9 +804,10 @@ export default function Admin() {
               Help Articles
             </button>
           </div>
+          )}
 
           <div className="p-6">
-            {activeTab === "overview" && (
+            {!editorOnly && activeTab === "overview" && (
               <section className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-100">Overview</h2>
                 <p className="text-sm text-slate-400">Manage global app announcements and published help resources.</p>
@@ -795,7 +828,7 @@ export default function Admin() {
               </section>
             )}
 
-            {activeTab === "banner" && (
+            {!editorOnly && activeTab === "banner" && (
               <section className="space-y-5">
                 <div className="flex items-start gap-3">
                   <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
@@ -862,17 +895,17 @@ export default function Admin() {
             )}
 
             {activeTab === "help-docs" && (
-              <section className={articleEditorFullscreen ? "fixed inset-0 z-40 bg-slate-950/95 p-4 sm:p-6" : ""}>
+              <section>
                 <div
                   className={
-                    articleEditorFullscreen
-                      ? "mx-auto grid h-full w-full max-w-[1800px] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]"
+                    isWideEditorLayout
+                      ? `grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)] ${editorOnly ? "min-h-[calc(100vh-220px)]" : ""}`
                       : "grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]"
                   }
                 >
                 <div
                   className={`rounded-xl border border-slate-700/70 bg-slate-900/50 p-3 space-y-2 ${
-                    articleEditorFullscreen ? "flex h-full min-h-0 flex-col" : ""
+                    isWideEditorLayout ? "flex h-full min-h-0 flex-col" : ""
                   }`}
                 >
                   <button
@@ -928,7 +961,7 @@ export default function Admin() {
                   </div>
                   <div
                     className={`space-y-1 pr-1 ${
-                      articleEditorFullscreen ? "min-h-0 flex-1 overflow-auto" : "max-h-[460px] overflow-auto"
+                      isWideEditorLayout ? "min-h-0 flex-1 overflow-auto" : "max-h-[460px] overflow-auto"
                     }`}
                   >
                     {loadingArticles ? (
@@ -965,7 +998,7 @@ export default function Admin() {
 
                 <div
                   className={`rounded-xl border border-slate-700/70 bg-slate-900/50 p-4 space-y-4 ${
-                    articleEditorFullscreen ? "h-full overflow-auto" : ""
+                    isWideEditorLayout ? "h-full overflow-auto" : ""
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -977,13 +1010,23 @@ export default function Admin() {
                       <div className="text-xs text-slate-400">
                         {selectedArticle ? `Updated ${formatUpdatedAt(selectedArticle.updated_at)}` : "Unsaved draft"}
                       </div>
-                      <button
-                        onClick={() => setArticleEditorFullscreen((v) => !v)}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
-                      >
-                        {articleEditorFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-                        {articleEditorFullscreen ? "Exit Full Screen" : "Full Screen"}
-                      </button>
+                      {!editorOnly && (
+                        <button
+                          onClick={() => setArticleEditorFullscreen((v) => !v)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                        >
+                          {articleEditorFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                          {articleEditorFullscreen ? "Exit Full Screen" : "Full Screen"}
+                        </button>
+                      )}
+                      {!editorOnly && (
+                        <button
+                          onClick={() => navigateTo("/admin/editor")}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/35 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100 hover:bg-blue-500/20"
+                        >
+                          Open Dedicated Page
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1094,7 +1137,7 @@ export default function Admin() {
                     </div>
                     <textarea
                       ref={articleTextareaRef}
-                      rows={articleEditorFullscreen ? 28 : 14}
+                      rows={isWideEditorLayout ? 28 : 14}
                       value={articleContent}
                       onChange={(e) => {
                         setArticleContent(e.target.value);
@@ -1164,7 +1207,7 @@ export default function Admin() {
                       onScroll={clearArticleHoverPreview}
                       data-link-editor="true"
                       className={`mt-2 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 ${
-                        articleEditorFullscreen ? "min-h-[58vh]" : ""
+                        isWideEditorLayout ? "min-h-[58vh]" : ""
                       }`}
                       placeholder="Use markdown-style formatting (# heading, - list, 1. list)."
                     />
