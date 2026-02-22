@@ -117,8 +117,30 @@ export function LinkPickerModal({
     return !!selectedOption;
   })();
 
+  const submitLink = () => {
+    if (!canSubmit) return;
+    const cleanLabel = displayText.trim();
+    const target: LinkTarget =
+      activeTab === 'external'
+        ? { type: 'external', url: normalizeExternalUrl(externalUrl) }
+        : (selectedOption as LinkPickerOption).target;
+    onSubmit({
+      label: cleanLabel,
+      target,
+      token: createMarkdownLink(cleanLabel, target),
+    });
+  };
+
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 sm:p-6">
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4 sm:p-6"
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' || e.shiftKey) return;
+        if ((e.nativeEvent as KeyboardEvent).isComposing) return;
+        e.preventDefault();
+        submitLink();
+      }}
+    >
       <button className="absolute inset-0 bg-black/65" onClick={onClose} aria-label="Close" />
       <div className="relative w-[780px] max-w-[96vw] rounded-3xl border border-slate-700/70 bg-slate-950/95 p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
@@ -240,19 +262,7 @@ export function LinkPickerModal({
           </button>
           <button
             disabled={!canSubmit}
-            onClick={() => {
-              if (!canSubmit) return;
-              const cleanLabel = displayText.trim();
-              const target: LinkTarget =
-                activeTab === 'external'
-                  ? { type: 'external', url: normalizeExternalUrl(externalUrl) }
-                  : (selectedOption as LinkPickerOption).target;
-              onSubmit({
-                label: cleanLabel,
-                target,
-                token: createMarkdownLink(cleanLabel, target),
-              });
-            }}
+            onClick={submitLink}
             className={`rounded-xl border px-3 py-2 text-sm ${
               canSubmit
                 ? 'border-blue-500/35 bg-blue-500/15 text-blue-100 hover:bg-blue-500/25'
