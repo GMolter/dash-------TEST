@@ -1,6 +1,6 @@
 import type { LinkTarget } from '../../lib/linking';
 
-export type LinkPickerTab = 'external' | 'file' | 'resource' | 'planner' | 'board' | 'help';
+export type LinkPickerTab = 'external' | 'file' | 'resource' | 'planner' | 'board' | 'help' | 'teleport';
 
 export type LinkPickerOption = {
   id: string;

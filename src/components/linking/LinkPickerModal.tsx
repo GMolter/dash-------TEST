@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link2, FolderOpen, CalendarDays, Columns3, BookOpenText, X, Search } from 'lucide-react';
+import { Link2, FolderOpen, CalendarDays, Columns3, BookOpenText, X, Search, Route } from 'lucide-react';
 import type { LinkTarget } from '../../lib/linking';
 import { createMarkdownLink, normalizeExternalUrl } from '../../lib/linking';
 import type { LinkPickerOption, LinkPickerTab } from './types';
@@ -20,6 +20,7 @@ function tabIcon(tab: LinkPickerTab) {
   if (tab === 'resource') return <Link2 className="h-4 w-4" />;
   if (tab === 'planner') return <CalendarDays className="h-4 w-4" />;
   if (tab === 'board') return <Columns3 className="h-4 w-4" />;
+  if (tab === 'teleport') return <Route className="h-4 w-4" />;
   return <BookOpenText className="h-4 w-4" />;
 }
 
@@ -29,12 +30,14 @@ function tabLabel(tab: LinkPickerTab) {
   if (tab === 'resource') return 'Resources';
   if (tab === 'planner') return 'Planner';
   if (tab === 'board') return 'Board';
+  if (tab === 'teleport') return 'Teleports';
   return 'Help Articles';
 }
 
 function isTargetForTab(target: LinkTarget, tab: LinkPickerTab) {
   if (tab === 'external') return target.type === 'external';
   if (tab === 'help') return target.type === 'help';
+  if (tab === 'teleport') return target.type === 'help_anchor';
   if (tab === 'file') return target.type === 'project_file';
   if (tab === 'resource') return target.type === 'project_resource';
   if (tab === 'planner') return target.type === 'project_planner';
@@ -45,9 +48,11 @@ function targetsEqual(a: LinkTarget, b: LinkTarget) {
   if (a.type !== b.type) return false;
   if (a.type === 'external') return b.type === 'external' && a.url === b.url;
   if (a.type === 'help') return b.type === 'help' && a.articleId === b.articleId;
+  if (a.type === 'help_anchor') return b.type === 'help_anchor' && a.anchorId === b.anchorId;
   return (
     b.type !== 'external' &&
     b.type !== 'help' &&
+    b.type !== 'help_anchor' &&
     a.projectId === b.projectId &&
     a.targetId === b.targetId
   );

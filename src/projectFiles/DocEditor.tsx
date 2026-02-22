@@ -300,7 +300,7 @@ export function DocEditor({
     el.dataset.linkNode = 'true';
     el.contentEditable = 'false';
     el.className = '';
-    if (target.type === 'external' || target.type === 'help') {
+    if (target.type === 'external' || target.type === 'help' || target.type === 'help_anchor') {
       el.className =
         'inline cursor-pointer text-sky-300 underline decoration-sky-300/70 underline-offset-4 hover:text-cyan-200';
       return;
@@ -426,6 +426,15 @@ export function DocEditor({
       };
     }
 
+    if (link.target.type === 'help_anchor') {
+      return {
+        title: link.label,
+        subtitle: `In-article teleport (#${link.target.anchorId})`,
+        warning: 'Teleport links are only available inside help articles.',
+        actionHint: 'Reference unavailable',
+      };
+    }
+
     if (link.target.type === 'project_file') {
       const target = fileTargets.find((file) => file.id === link.target?.targetId);
       const isMissing = !target;
@@ -456,6 +465,15 @@ export function DocEditor({
         subtitle: target ? (target.archived ? 'Archived planner task' : 'Planner task') : 'Planner task reference',
         warning: isMissing ? 'Reference unavailable.' : undefined,
         actionHint: isMissing ? 'Reference unavailable' : 'In-app reference (Planner tab)',
+      };
+    }
+
+    if (link.target.type !== 'project_board') {
+      return {
+        title: link.label,
+        subtitle: 'Unsupported reference',
+        warning: 'Reference unavailable.',
+        actionHint: 'Reference unavailable',
       };
     }
 
@@ -553,6 +571,9 @@ export function DocEditor({
             }
             if (token.target.type === 'help') {
               window.open('/help', '_blank', 'noopener,noreferrer');
+              return;
+            }
+            if (token.target.type === 'help_anchor') {
               return;
             }
             onActivateInternalLink?.(token);

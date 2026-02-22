@@ -3,6 +3,7 @@ import { ArrowLeft, FileText, Home } from 'lucide-react';
 import { LinkedContent } from '../components/linking/renderLinkedContent';
 import type { LinkResolvedMeta } from '../components/linking/types';
 import type { ParsedMarkdownLink } from '../lib/linking';
+import { extractArticleAnchors } from '../lib/helpArticleFormatting';
 
 type Article = {
   id: string;
@@ -65,8 +66,14 @@ export function HelpArticlePage({ slug }: { slug: string }) {
     };
   }, [helpRefs]);
 
+  const articleAnchors = useMemo(
+    () => extractArticleAnchors(article?.content || ''),
+    [article?.content],
+  );
+
   const resolveMeta = useMemo(() => {
     const byId = new Map(helpRefs.map((item) => [item.id, item]));
+    const anchorById = new Map(articleAnchors.map((anchor) => [anchor.id, anchor]));
     return (link: ParsedMarkdownLink): LinkResolvedMeta => {
       if (!link.target) {
         return { exists: false, title: link.label, subtitle: 'Invalid link format' };
@@ -93,13 +100,39 @@ export function HelpArticlePage({ slug }: { slug: string }) {
           subtitle: `/help/article/${articleRef.slug}`,
         };
       }
+      if (link.target.type === 'help_anchor') {
+        const anchor = anchorById.get(link.target.anchorId);
+        if (!anchor) {
+          return {
+            exists: false,
+            title: link.label,
+            subtitle: `Section unavailable (#${link.target.anchorId})`,
+          };
+        }
+        return {
+          exists: true,
+          title: anchor.title,
+          subtitle: `Jump to #${anchor.id}`,
+        };
+      }
       return {
         exists: false,
         title: link.label,
         subtitle: 'Project-only reference not available in public help',
       };
     };
-  }, [helpRefs]);
+  }, [articleAnchors, helpRefs]);
+
+  useEffect(() => {
+    if (!article) return;
+    const hash = window.location.hash.replace(/^#/, '').trim();
+    if (!hash) return;
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(hash);
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [article?.id]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white">
@@ -142,7 +175,13 @@ export function HelpArticlePage({ slug }: { slug: string }) {
                   content={article.content || 'No content yet.'}
                   resolveMeta={resolveMeta}
                   resolveHelpHref={resolveHelpHref}
-                  className="whitespace-pre-wrap text-sm leading-6 text-slate-100 font-sans"
+                  className="space-y-4 text-sm leading-6 text-slate-100 font-sans"
+                  onActivateHelpTeleport={(anchorId) => {
+                    const target = document.getElementById(anchorId);
+                    if (!target) return;
+                    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    window.history.replaceState(null, '', `#${anchorId}`);
+                  }}
                 />
               </div>
             </div>

@@ -7,6 +7,7 @@ export type InternalLinkType =
 export type LinkTarget =
   | { type: 'external'; url: string }
   | { type: 'help'; articleId: string }
+  | { type: 'help_anchor'; anchorId: string }
   | { type: InternalLinkType; projectId: string; targetId: string };
 
 export type ParsedMarkdownLink = {
@@ -30,6 +31,11 @@ function decodeOlioHref(href: string): LinkTarget | null {
     return { type: 'help', articleId: helpMatch[1] };
   }
 
+  const helpAnchorMatch = href.match(/^olio:\/\/help-anchor\/([^/?#]+)$/i);
+  if (helpAnchorMatch) {
+    return { type: 'help_anchor', anchorId: helpAnchorMatch[1] };
+  }
+
   const projectMatch = href.match(/^olio:\/\/project\/([^/]+)\/(file|resource|planner|board)\/([^/?#]+)$/i);
   if (!projectMatch) return null;
 
@@ -51,6 +57,7 @@ export function normalizeExternalUrl(raw: string): string {
 export function buildLinkHref(target: LinkTarget): string {
   if (target.type === 'external') return normalizeExternalUrl(target.url);
   if (target.type === 'help') return `olio://help/${target.articleId}`;
+  if (target.type === 'help_anchor') return `olio://help-anchor/${target.anchorId}`;
   if (target.type === 'project_file') return `olio://project/${target.projectId}/file/${target.targetId}`;
   if (target.type === 'project_resource') return `olio://project/${target.projectId}/resource/${target.targetId}`;
   if (target.type === 'project_planner') return `olio://project/${target.projectId}/planner/${target.targetId}`;

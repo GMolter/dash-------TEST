@@ -14,6 +14,11 @@ import {
   Trash2,
   HelpCircle,
   Link2,
+  List,
+  ListOrdered,
+  CornerDownLeft,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import type { LinkPickerOption } from "../components/linking/types";
 import { LinkPickerModal } from "../components/linking/LinkPickerModal";
@@ -24,8 +29,10 @@ import {
   findLinkAtPosition,
   findMarkdownLinkAtClientPoint,
   removeMarkdownLink,
+  replaceContentRange,
   replaceSelectionWithLink,
 } from "../lib/linking";
+import { extractArticleAnchors } from "../lib/helpArticleFormatting";
 
 type BannerState = {
   enabled: boolean;
@@ -110,6 +117,7 @@ export default function Admin() {
   const [articlePublished, setArticlePublished] = useState(false);
   const [articleSortOrder, setArticleSortOrder] = useState(0);
   const [articleFilter, setArticleFilter] = useState<ArticleFilter>("all");
+  const [articleEditorFullscreen, setArticleEditorFullscreen] = useState(true);
   const [articleLinkPickerOpen, setArticleLinkPickerOpen] = useState(false);
   const [articleLinkInitialLabel, setArticleLinkInitialLabel] = useState("");
   const [articlePendingRange, setArticlePendingRange] = useState<LinkDraftRange | null>(null);
@@ -152,6 +160,26 @@ export default function Admin() {
       })),
     [articles]
   );
+  const articleTeleportAnchors = useMemo(
+    () => extractArticleAnchors(articleContent),
+    [articleContent]
+  );
+  const teleportLinkOptions = useMemo<LinkPickerOption[]>(
+    () =>
+      articleTeleportAnchors.map((anchor) => ({
+        id: `teleport-${anchor.id}`,
+        tab: "teleport",
+        title: anchor.title,
+        subtitle: `#${anchor.id}`,
+        badge: `H${anchor.level}`,
+        target: { type: "help_anchor", anchorId: anchor.id },
+      })),
+    [articleTeleportAnchors]
+  );
+  const articleLinkOptions = useMemo<LinkPickerOption[]>(
+    () => [...helpLinkOptions, ...teleportLinkOptions],
+    [helpLinkOptions, teleportLinkOptions]
+  );
 
   function openArticleLinkPicker(start: number, end: number, initialTarget: LinkTarget | null) {
     const selection = start !== end ? articleContent.slice(start, end) : "";
@@ -167,6 +195,50 @@ export default function Admin() {
     }
     articleHoverTokenKeyRef.current = null;
     setArticleHoverPreview(null);
+  }
+
+  function applyArticleContentEdit(nextContent: string, nextSelectionStart: number, nextSelectionEnd: number) {
+    setArticleContent(nextContent);
+    clearArticleHoverPreview();
+    window.requestAnimationFrame(() => {
+      const el = articleTextareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+    });
+  }
+
+  function formatArticleSelectionAsList(mode: "ordered" | "unordered") {
+    const el = articleTextareaRef.current;
+    if (!el) return;
+
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const blockStart = articleContent.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+    const lineAfterEnd = articleContent.indexOf("\n", end);
+    const blockEnd = lineAfterEnd === -1 ? articleContent.length : lineAfterEnd;
+    const blockText = articleContent.slice(blockStart, blockEnd);
+    const lines = blockText.split("\n");
+    const nextLines = lines.map((line, idx) => {
+      if (!line.trim()) return line;
+      const clean = line.replace(/^\s*(?:[-*+]\s+|\d+\.\s+)/, "");
+      if (mode === "ordered") return `${idx + 1}. ${clean}`;
+      return `- ${clean}`;
+    });
+
+    const replacement = nextLines.join("\n");
+    const nextContent = `${articleContent.slice(0, blockStart)}${replacement}${articleContent.slice(blockEnd)}`;
+    applyArticleContentEdit(nextContent, blockStart, blockStart + replacement.length);
+  }
+
+  function insertArticleLineBreak() {
+    const el = articleTextareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const nextContent = replaceContentRange(articleContent, start, end, "\n");
+    const nextCursor = start + 1;
+    applyArticleContentEdit(nextContent, nextCursor, nextCursor);
   }
 
   function buildArticleHoverPreview(link: ParsedMarkdownLink): Omit<HoverPreviewState, "x" | "y"> {
@@ -199,6 +271,17 @@ export default function Admin() {
           ? "Reference unavailable."
           : (article && !article.is_published ? "Draft links may 404 publicly until published." : undefined),
         actionHint: "Opens in new tab",
+      };
+    }
+
+    if (link.target.type === "help_anchor") {
+      const anchor = articleTeleportAnchors.find((item) => item.id === link.target?.anchorId);
+      const missing = !anchor;
+      return {
+        title: anchor?.title || link.label,
+        subtitle: anchor ? `Jump to #${anchor.id}` : `Section #${link.target.anchorId}`,
+        warning: missing ? "Reference unavailable in this article." : undefined,
+        actionHint: missing ? "Reference unavailable" : "Scrolls within this article",
       };
     }
 
@@ -779,8 +862,19 @@ export default function Admin() {
             )}
 
             {activeTab === "help-docs" && (
-              <section className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-                <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-3 space-y-2">
+              <section className={articleEditorFullscreen ? "fixed inset-0 z-40 bg-slate-950/95 p-4 sm:p-6" : ""}>
+                <div
+                  className={
+                    articleEditorFullscreen
+                      ? "mx-auto grid h-full w-full max-w-[1800px] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]"
+                      : "grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]"
+                  }
+                >
+                <div
+                  className={`rounded-xl border border-slate-700/70 bg-slate-900/50 p-3 space-y-2 ${
+                    articleEditorFullscreen ? "flex h-full min-h-0 flex-col" : ""
+                  }`}
+                >
                   <button
                     onClick={() => {
                       clearEditor();
@@ -832,7 +926,11 @@ export default function Admin() {
                       </button>
                     </div>
                   </div>
-                  <div className="max-h-[460px] overflow-auto space-y-1 pr-1">
+                  <div
+                    className={`space-y-1 pr-1 ${
+                      articleEditorFullscreen ? "min-h-0 flex-1 overflow-auto" : "max-h-[460px] overflow-auto"
+                    }`}
+                  >
                     {loadingArticles ? (
                       <div className="text-sm text-slate-400 px-2 py-2">Loading...</div>
                     ) : filteredArticles.length === 0 ? (
@@ -865,14 +963,27 @@ export default function Admin() {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-slate-700/70 bg-slate-900/50 p-4 space-y-4">
-                  <div className="flex items-center justify-between gap-3">
+                <div
+                  className={`rounded-xl border border-slate-700/70 bg-slate-900/50 p-4 space-y-4 ${
+                    articleEditorFullscreen ? "h-full overflow-auto" : ""
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2 text-white">
                       <FileText className="w-4 h-4 text-blue-300" />
                       <h2 className="text-lg font-semibold">Article Editor</h2>
                     </div>
-                    <div className="text-xs text-slate-400">
-                      {selectedArticle ? `Updated ${formatUpdatedAt(selectedArticle.updated_at)}` : "Unsaved draft"}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-xs text-slate-400">
+                        {selectedArticle ? `Updated ${formatUpdatedAt(selectedArticle.updated_at)}` : "Unsaved draft"}
+                      </div>
+                      <button
+                        onClick={() => setArticleEditorFullscreen((v) => !v)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                      >
+                        {articleEditorFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                        {articleEditorFullscreen ? "Exit Full Screen" : "Full Screen"}
+                      </button>
                     </div>
                   </div>
 
@@ -956,11 +1067,34 @@ export default function Admin() {
                         <Link2 className="h-3.5 w-3.5" />
                         Insert Link
                       </button>
-                      <div className="text-xs text-slate-400">Ctrl/Cmd+K inserts link when text is selected.</div>
+                      <button
+                        onClick={() => formatArticleSelectionAsList("unordered")}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                      >
+                        <List className="h-3.5 w-3.5" />
+                        Unordered List
+                      </button>
+                      <button
+                        onClick={() => formatArticleSelectionAsList("ordered")}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                      >
+                        <ListOrdered className="h-3.5 w-3.5" />
+                        Ordered List
+                      </button>
+                      <button
+                        onClick={insertArticleLineBreak}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                      >
+                        <CornerDownLeft className="h-3.5 w-3.5" />
+                        Line Break
+                      </button>
+                    </div>
+                    <div className="mt-2 text-xs text-slate-400">
+                      Ctrl/Cmd+K inserts links. Use heading syntax (example: <code>## Account Setup</code>) to create teleport targets.
                     </div>
                     <textarea
                       ref={articleTextareaRef}
-                      rows={14}
+                      rows={articleEditorFullscreen ? 28 : 14}
                       value={articleContent}
                       onChange={(e) => {
                         setArticleContent(e.target.value);
@@ -1029,8 +1163,10 @@ export default function Admin() {
                       onMouseLeave={clearArticleHoverPreview}
                       onScroll={clearArticleHoverPreview}
                       data-link-editor="true"
-                      className="mt-2 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100"
-                      placeholder="Use plain text for now."
+                      className={`mt-2 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 ${
+                        articleEditorFullscreen ? "min-h-[58vh]" : ""
+                      }`}
+                      placeholder="Use markdown-style formatting (# heading, - list, 1. list)."
                     />
                     <LinkHoverPreview
                       visible={!!articleHoverPreview}
@@ -1105,8 +1241,8 @@ export default function Admin() {
 
                   <LinkPickerModal
                     open={articleLinkPickerOpen}
-                    allowedTabs={["external", "help"]}
-                    options={helpLinkOptions}
+                    allowedTabs={["external", "help", "teleport"]}
+                    options={articleLinkOptions}
                     initialLabel={articleLinkInitialLabel}
                     initialTarget={articlePendingRange?.initialTarget || null}
                     onClose={() => {
@@ -1131,6 +1267,7 @@ export default function Admin() {
                       });
                     }}
                   />
+                </div>
                 </div>
               </section>
             )}
