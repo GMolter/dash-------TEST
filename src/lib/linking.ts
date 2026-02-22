@@ -23,7 +23,7 @@ export type LinkedSegment =
   | { kind: 'text'; text: string; start: number; end: number }
   | { kind: 'link'; link: ParsedMarkdownLink };
 
-const LINK_REGEX = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+const LINK_REGEX = /\[([^\]\n]+)\]\(\s*(<[^>\n]+>|[^)\s]+)(?:\s+"[^"\n]*")?\s*\)/g;
 
 function decodeOlioHref(href: string): LinkTarget | null {
   const helpMatch = href.match(/^olio:\/\/help\/([^/?#]+)$/i);
@@ -85,7 +85,11 @@ export function parseMarkdownLinks(content: string): LinkedSegment[] {
   while ((match = LINK_REGEX.exec(content)) !== null) {
     const full = match[0];
     const label = match[1];
-    const href = match[2];
+    const rawHref = match[2];
+    const href =
+      rawHref.startsWith('<') && rawHref.endsWith('>')
+        ? rawHref.slice(1, -1).trim()
+        : rawHref;
     const start = match.index;
     const end = start + full.length;
 

@@ -76,6 +76,13 @@ type HoverPreviewState = {
   actionHint?: string;
 };
 
+type MdTipsLayout = {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+};
+
 function slugify(input: string) {
   return input
     .toLowerCase()
@@ -138,6 +145,9 @@ export default function Admin({ editorOnly = false }: AdminProps) {
   const articleHoverTimerRef = useRef<number | null>(null);
   const articleHoverTokenKeyRef = useRef<string | null>(null);
   const articleHoverPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const mdTipsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [mdTipsOpen, setMdTipsOpen] = useState(false);
+  const [mdTipsLayout, setMdTipsLayout] = useState<MdTipsLayout | null>(null);
 
   const canSaveBanner = useMemo(() => {
     if (!banner.enabled) return true;
@@ -230,7 +240,7 @@ export default function Admin({ editorOnly = false }: AdminProps) {
     const lines = blockText.split("\n");
     const hasNonEmpty = lines.some((line) => line.trim().length > 0);
     if (!hasNonEmpty) {
-      const marker = mode === "ordered" ? "1. " : "• ";
+      const marker = mode === "ordered" ? "1. " : "- ";
       const nextContent = `${articleContent.slice(0, blockStart)}${marker}${articleContent.slice(blockEnd)}`;
       const cursor = blockStart + marker.length;
       applyArticleContentEdit(nextContent, cursor, cursor);
@@ -240,13 +250,13 @@ export default function Admin({ editorOnly = false }: AdminProps) {
     let orderedCounter = 1;
     const nextLines = lines.map((line) => {
       if (!line.trim()) return line;
-      const clean = line.replace(/^\s*(?:[-*+]|•|\d+\.)\s+/, "");
+      const clean = line.replace(/^\s*(?:[-*+]|\u2022|\d+\.)\s+/, "");
       if (mode === "ordered") {
         const numbered = `${orderedCounter}. ${clean}`;
         orderedCounter += 1;
         return numbered;
       }
-      return `• ${clean}`;
+      return `- ${clean}`;
     });
 
     const replacement = nextLines.join("\n");
@@ -281,7 +291,7 @@ export default function Admin({ editorOnly = false }: AdminProps) {
 
     const { start: lineStart, end: lineEnd } = getLineBounds(articleContent, start);
     const currentLine = articleContent.slice(lineStart, lineEnd);
-    const unorderedMatch = currentLine.match(/^(\s*)(?:[-*+]|•)\s+(.*)$/);
+    const unorderedMatch = currentLine.match(/^(\s*)(?:[-*+]|\u2022)\s+(.*)$/);
     const orderedMatch = currentLine.match(/^(\s*)(\d+)\.\s+(.*)$/);
 
     if (!unorderedMatch && !orderedMatch) {
@@ -301,7 +311,7 @@ export default function Admin({ editorOnly = false }: AdminProps) {
         applyArticleContentEdit(next, cursor, cursor);
         return;
       }
-      const marker = `\n${indent}• `;
+      const marker = `\n${indent}- `;
       const next = replaceContentRange(articleContent, start, end, marker);
       const cursor = start + marker.length;
       applyArticleContentEdit(next, cursor, cursor);
@@ -516,9 +526,60 @@ export default function Admin({ editorOnly = false }: AdminProps) {
     setActiveTab("help-docs");
   }, [editorOnly]);
 
+  useEffect(() => {
+    if (!mdTipsOpen) return;
+
+    const onResize = () => setMdTipsLayout(computeMdTipsLayout());
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMdTipsOpen(false);
+    };
+
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onResize, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mdTipsOpen]);
+
+  useEffect(() => {
+    if (activeTab !== "help-docs" || !editorOnly) {
+      setMdTipsOpen(false);
+    }
+  }, [activeTab, editorOnly]);
+
   function navigateTo(path: string) {
     window.history.pushState({}, "", path);
     window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+
+  function computeMdTipsLayout(): MdTipsLayout | null {
+    const btn = mdTipsButtonRef.current;
+    if (!btn) return null;
+
+    const rect = btn.getBoundingClientRect();
+    const width = Math.min(460, Math.max(320, window.innerWidth - 16));
+    const maxHeight = Math.min(620, window.innerHeight - 20);
+    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+    const preferredTop = rect.bottom + 8;
+    const top =
+      preferredTop + maxHeight > window.innerHeight - 8
+        ? Math.max(8, rect.top - maxHeight - 8)
+        : preferredTop;
+
+    return { top, left, width, maxHeight };
+  }
+
+  function toggleMdTips() {
+    if (mdTipsOpen) {
+      setMdTipsOpen(false);
+      return;
+    }
+    setMdTipsLayout(computeMdTipsLayout());
+    setMdTipsOpen(true);
   }
 
   async function login(e: React.FormEvent) {
@@ -1231,9 +1292,68 @@ export default function Admin({ editorOnly = false }: AdminProps) {
                         <CornerDownLeft className="h-3.5 w-3.5" />
                         Horizontal Line
                       </button>
+                      <button
+                        ref={mdTipsButtonRef}
+                        onClick={toggleMdTips}
+                        className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-100 hover:bg-cyan-500/20"
+                      >
+                        <BookOpenText className="h-3.5 w-3.5" />
+                        MD Tips
+                      </button>
                     </div>
+                    {mdTipsOpen && mdTipsLayout ? (
+                      <div
+                        className="fixed z-[95] rounded-2xl border border-slate-700/80 bg-slate-950/98 shadow-2xl backdrop-blur"
+                        style={{
+                          top: mdTipsLayout.top,
+                          left: mdTipsLayout.left,
+                          width: mdTipsLayout.width,
+                          maxHeight: mdTipsLayout.maxHeight,
+                        }}
+                      >
+                        <div className="flex items-center justify-between border-b border-slate-700/70 px-4 py-2.5">
+                          <div className="text-sm font-semibold text-slate-100">Markdown Tips</div>
+                          <button
+                            onClick={() => setMdTipsOpen(false)}
+                            className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <div className="space-y-4 overflow-auto px-4 py-3 text-xs leading-5 text-slate-200">
+                          <section className="space-y-1">
+                            <div className="font-semibold text-slate-100">Headings</div>
+                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300"># Title{"\n"}## Section{"\n"}### Subsection</pre>
+                          </section>
+                          <section className="space-y-1">
+                            <div className="font-semibold text-slate-100">Text</div>
+                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">**bold**{"\n"}*italic*  _italic_{"\n"}***bold italic***{"\n"}~~strikethrough~~{"\n"}`inline code`{"\n"}&lt;u&gt;underline&lt;/u&gt;</pre>
+                          </section>
+                          <section className="space-y-1">
+                            <div className="font-semibold text-slate-100">Lists</div>
+                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">- item{"\n"}- item{"\n"}{"\n"}1. first{"\n"}2. second{"\n"}{"\n"}- [x] done{"\n"}- [ ] todo</pre>
+                          </section>
+                          <section className="space-y-1">
+                            <div className="font-semibold text-slate-100">Links</div>
+                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">[OpenAI](https://openai.com){"\n"}[Text](https://example.com "Title"){"\n"}&lt;https://example.com&gt;{"\n"}[Text][id]{"\n"}[id]: https://example.com</pre>
+                          </section>
+                          <section className="space-y-1">
+                            <div className="font-semibold text-slate-100">Code</div>
+                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">```ts{"\n"}const x = 1;{"\n"}```{"\n"}{"\n"}    indented code</pre>
+                          </section>
+                          <section className="space-y-1">
+                            <div className="font-semibold text-slate-100">Blocks</div>
+                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">&gt; quote{"\n"}&gt;&gt; nested quote{"\n"}{"\n"}---{"\n"}{"\n"}| Name | Age |{"\n"}| :--- | ---: |{"\n"}| Bob  | 25   |</pre>
+                          </section>
+                          <section className="space-y-1">
+                            <div className="font-semibold text-slate-100">Extended</div>
+                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">\\*literal asterisk\\*{"\n"}[^1] footnote ref{"\n"}[^1]: Footnote text{"\n"}{"\n"}Term{"\n"}: Definition{"\n"}{"\n"}==highlight==  X^2^  H~2~O{"\n"}{"\n"}&lt;!-- hidden comment --&gt;{"\n"}&lt;details&gt;&lt;summary&gt;Click&lt;/summary&gt;Hidden&lt;/details&gt;</pre>
+                          </section>
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="mt-2 text-xs text-slate-400">
-                      Ctrl/Cmd+K inserts links. Use heading syntax (example: <code>## Account Setup</code>) to create teleport targets.
+                      Ctrl/Cmd+K inserts links. Use heading syntax (example: <code>## Account Setup</code>) to create teleport targets. MD Tips stays open while you type.
                     </div>
                     <textarea
                       ref={articleTextareaRef}
@@ -1319,7 +1439,7 @@ export default function Admin({ editorOnly = false }: AdminProps) {
                       className={`mt-2 w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-slate-100 ${
                         isWideEditorLayout ? "min-h-[58vh]" : ""
                       }`}
-                      placeholder="Use markdown-style formatting (# heading, • list, 1. list)."
+                      placeholder="Use markdown-style formatting (# heading, - list, 1. list)."
                     />
                     <LinkHoverPreview
                       visible={!!articleHoverPreview}
