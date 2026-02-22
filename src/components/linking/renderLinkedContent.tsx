@@ -21,6 +21,14 @@ type HoverState = {
   actionHint?: string;
 };
 
+function internalBadgeLabel(link: ParsedMarkdownLink) {
+  if (!link.target || !link.target.type.startsWith('project_')) return '';
+  if (link.target.type === 'project_file') return 'File';
+  if (link.target.type === 'project_resource') return 'Resource';
+  if (link.target.type === 'project_planner') return 'Planner';
+  return 'Board';
+}
+
 function renderTextFragment(text: string, keyPrefix: string) {
   const lines = text.split('\n');
   return lines.map((line, idx) => (
@@ -100,10 +108,12 @@ export function LinkedContent({
           });
 
           if (isInternal) {
+            const badgeLabel = internalBadgeLabel(link);
             return (
               <button
                 key={`link-${idx}`}
                 type="button"
+                data-linked-content-link="true"
                 onMouseEnter={(e) => queueHoverPreview(hoverStateFromEvent(e))}
                 onMouseMove={(e) => {
                   if (hover) {
@@ -111,18 +121,26 @@ export function LinkedContent({
                   }
                 }}
                 onMouseLeave={clearHoverPreview}
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   if (isMissing) return;
                   onActivateInternalLink?.(link);
                 }}
-                className={`mx-0.5 inline-flex items-center rounded-full border px-2 py-0.5 text-xs ${
+                className={`mx-0.5 inline-flex items-center gap-1 rounded-2xl border px-2.5 py-1 text-[11px] font-medium transition-colors ${
                   isMissing
-                    ? 'cursor-not-allowed border-red-500/45 bg-red-500/12 text-red-200'
-                    : 'border-blue-500/35 bg-blue-500/12 text-blue-100 hover:bg-blue-500/22'
+                    ? 'cursor-not-allowed border-red-500/50 bg-red-500/14 text-red-200'
+                    : 'border-cyan-400/40 bg-cyan-500/14 text-cyan-100 hover:bg-cyan-500/24 shadow-[0_0_0_1px_rgba(34,211,238,0.1)]'
                 }`}
                 title={isMissing ? 'Reference unavailable' : undefined}
               >
-                {isMissing ? `Missing: ${link.label}` : link.label}
+                <span className={`rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                  isMissing
+                    ? 'border-red-400/40 bg-red-500/16 text-red-100'
+                    : 'border-cyan-300/45 bg-cyan-400/16 text-cyan-100'
+                }`}>
+                  {badgeLabel}
+                </span>
+                <span className="truncate">{isMissing ? `Missing: ${link.label}` : link.label}</span>
               </button>
             );
           }
@@ -131,6 +149,7 @@ export function LinkedContent({
             <button
               key={`link-${idx}`}
               type="button"
+              data-linked-content-link="true"
               onMouseEnter={(e) => queueHoverPreview(hoverStateFromEvent(e))}
               onMouseMove={(e) => {
                 if (hover) {
@@ -138,7 +157,8 @@ export function LinkedContent({
                 }
               }}
               onMouseLeave={clearHoverPreview}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 if (link.target?.type === 'external') {
                   window.open(link.target.url, '_blank', 'noopener,noreferrer');
                   return;
@@ -149,7 +169,7 @@ export function LinkedContent({
                   return;
                 }
               }}
-              className="inline cursor-pointer border-none bg-transparent p-0 text-left align-baseline text-blue-300 underline decoration-blue-400/70 underline-offset-4 hover:text-blue-200"
+              className="inline cursor-pointer border-none bg-transparent p-0 text-left align-baseline font-medium text-sky-300 underline decoration-sky-300/70 underline-offset-4 hover:text-cyan-200"
             >
               {link.label}
             </button>
