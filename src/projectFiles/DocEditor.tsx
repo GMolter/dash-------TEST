@@ -5,11 +5,10 @@ import { updateNode } from './store';
 import { supabase } from '../lib/supabase';
 import type { LinkTarget, ParsedMarkdownLink } from '../lib/linking';
 import {
-  findMarkdownLinkAtClientPoint,
-  findLinkAtPosition,
   parseMarkdownLinks,
-  removeMarkdownLink,
-  replaceSelectionWithLink,
+  buildLinkHref,
+  createMarkdownLink,
+  parseLinkTarget,
 } from '../lib/linking';
 import { LinkPickerModal } from '../components/linking/LinkPickerModal';
 import { EditorContextMenu } from '../components/linking/EditorContextMenu';
@@ -17,17 +16,16 @@ import { LinkHoverPreview } from '../components/linking/LinkHoverPreview';
 import type { LinkPickerOption } from '../components/linking/types';
 
 type LinkDraftRange = {
-  start: number;
-  end: number;
+  mode: 'insert' | 'edit';
+  selectionRange: Range | null;
+  linkElement: HTMLElement | null;
   initialTarget: LinkTarget | null;
 };
 
 type ContextMenuState = {
   x: number;
   y: number;
-  token: ParsedMarkdownLink | null;
-  start: number;
-  end: number;
+  linkElement: HTMLElement | null;
 };
 
 type HoverPreviewState = {
@@ -72,12 +70,14 @@ export function DocEditor({
   onTitleChange,
   onContentChange,
   onSaved,
+  onActivateInternalLink,
 }: {
   projectId: string;
   doc: FileNode;
   onTitleChange: (name: string) => void;
   onContentChange: (content: string) => void;
   onSaved?: () => void;
+  onActivateInternalLink?: (link: ParsedMarkdownLink) => void;
 }) {
   const [title, setTitle] = useState(doc.name);
   const [content, setContent] = useState(doc.content || '');
@@ -87,7 +87,6 @@ export function DocEditor({
   const [pendingRange, setPendingRange] = useState<LinkDraftRange | null>(null);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
-  const [editorScroll, setEditorScroll] = useState({ top: 0, left: 0 });
   const [fileTargets, setFileTargets] = useState<FileOption[]>([]);
   const [resourceTargets, setResourceTargets] = useState<ResourceOption[]>([]);
   const [plannerTargets, setPlannerTargets] = useState<PlannerOption[]>([]);
@@ -98,15 +97,14 @@ export function DocEditor({
   const hoverTokenKeyRef = useRef<string | null>(null);
   const hoverPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const lastSavedRef = useRef<string>(content);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setTitle(doc.name);
     setContent(doc.content || '');
     lastSavedRef.current = doc.content || '';
     setSaved(true);
-    setEditorScroll({ top: 0, left: 0 });
-  }, [doc.id, doc.name, doc.content]);
+  }, [doc.id, doc.name]);
 
   useEffect(() => {
     let cancelled = false;
@@ -197,6 +195,11 @@ export function DocEditor({
     };
   }, []);
 
+  useEffect(() => {
+    renderEditorFromMarkdown(doc.content || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.id]);
+
   const linkOptions = useMemo<LinkPickerOption[]>(() => {
     const fileItems: LinkPickerOption[] = fileTargets.map((file) => ({
       id: `file-${file.id}`,
@@ -254,30 +257,136 @@ export function DocEditor({
   }, [fileTargets, resourceTargets, plannerTargets, boardTargets, projectId]);
 
   const status = useMemo(() => (saved ? 'Saved' : 'Saving...'), [saved]);
-  const decoratedSegments = useMemo(() => parseMarkdownLinks(content || ''), [content]);
 
-  function internalChipLabel(link: ParsedMarkdownLink): string {
-    if (!link.target || !link.target.type.startsWith('project_')) return '';
-    if (link.target.type === 'project_file') return 'File';
-    if (link.target.type === 'project_resource') return 'Resource';
-    if (link.target.type === 'project_planner') return 'Planner';
-    return 'Board';
-  }
-
-  function applyEditorContent(next: string, nextCursor?: number) {
+  function applyEditorContent(next: string) {
     setContent(next);
     onContentChange(next);
-    if (typeof nextCursor === 'number' && textareaRef.current) {
-      window.requestAnimationFrame(() => {
-        textareaRef.current?.focus();
-        textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
-      });
-    }
   }
 
-  function openLinkPicker(start: number, end: number, initialTarget: LinkTarget | null) {
-    const selectionLabel = start !== end ? content.slice(start, end) : '';
-    setPendingRange({ start, end, initialTarget });
+  function setCaretAfterNode(node: Node) {
+    const sel = window.getSelection();
+    if (!sel) return;
+    const range = document.createRange();
+    range.setStartAfter(node);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function getSelectionRangeWithinEditor(): Range | null {
+    const editor = editorRef.current;
+    const sel = window.getSelection();
+    if (!editor || !sel || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return null;
+    return range;
+  }
+
+  function buildParsedLinkFromElement(el: HTMLElement): ParsedMarkdownLink | null {
+    const href = el.dataset.linkHref || '';
+    const label = (el.textContent || '').trim();
+    if (!href || !label) return null;
+    return {
+      raw: `[${label}](${href})`,
+      label,
+      href,
+      start: 0,
+      end: 0,
+      target: parseLinkTarget(href),
+    };
+  }
+
+  function decorateLinkElement(el: HTMLElement, target: LinkTarget) {
+    el.dataset.linkNode = 'true';
+    el.contentEditable = 'false';
+    el.className = '';
+    if (target.type === 'external' || target.type === 'help') {
+      el.className =
+        'inline cursor-pointer text-sky-300 underline decoration-sky-300/70 underline-offset-4 hover:text-cyan-200';
+      return;
+    }
+    el.className =
+      'mx-0.5 inline-flex cursor-pointer items-center rounded-full border border-cyan-400/40 bg-cyan-500/14 px-2 py-0.5 text-xs font-medium text-cyan-100 hover:bg-cyan-500/24';
+  }
+
+  function createLinkNode(label: string, target: LinkTarget) {
+    const node = document.createElement('span');
+    node.dataset.linkHref = buildLinkHref(target);
+    node.dataset.linkTarget = target.type;
+    node.textContent = label;
+    decorateLinkElement(node, target);
+    return node;
+  }
+
+  function serializeEditorContent() {
+    const editor = editorRef.current;
+    if (!editor) return '';
+    let out = '';
+
+    const walk = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        out += node.textContent?.replace(/\u00a0/g, ' ') || '';
+        return;
+      }
+      if (!(node instanceof HTMLElement)) return;
+
+      if (node.dataset.linkNode === 'true') {
+        const href = node.dataset.linkHref || '';
+        const label = node.textContent || '';
+        const target = parseLinkTarget(href);
+        out += target ? createMarkdownLink(label, target) : label;
+        return;
+      }
+
+      if (node.tagName === 'BR') {
+        out += '\n';
+        return;
+      }
+
+      const isBlock = node.tagName === 'DIV' || node.tagName === 'P';
+      const children = Array.from(node.childNodes);
+      children.forEach((child) => walk(child));
+      if (isBlock && node !== editor && out.length > 0 && !out.endsWith('\n')) out += '\n';
+    };
+
+    Array.from(editor.childNodes).forEach((child) => walk(child));
+    return out.replace(/\n{3,}/g, '\n\n');
+  }
+
+  function renderEditorFromMarkdown(markdown: string) {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const fragment = document.createDocumentFragment();
+    const segments = parseMarkdownLinks(markdown || '');
+    for (const segment of segments) {
+      if (segment.kind === 'text') {
+        fragment.appendChild(document.createTextNode(segment.text));
+        continue;
+      }
+      if (!segment.link.target) {
+        fragment.appendChild(document.createTextNode(segment.link.raw));
+        continue;
+      }
+      const linkNode = createLinkNode(segment.link.label, segment.link.target);
+      fragment.appendChild(linkNode);
+    }
+    editor.innerHTML = '';
+    editor.appendChild(fragment);
+  }
+
+  function syncEditorToState() {
+    const next = serializeEditorContent();
+    applyEditorContent(next);
+  }
+
+  function openLinkPickerForInsert(range: Range | null) {
+    setPendingRange({
+      mode: 'insert',
+      selectionRange: range ? range.cloneRange() : null,
+      linkElement: null,
+      initialTarget: null,
+    });
+    const selectionLabel = range && !range.collapsed ? range.toString() : '';
     setLinkPickerInitialLabel(selectionLabel);
     setLinkPickerOpen(true);
   }
@@ -388,9 +497,7 @@ export function DocEditor({
       <div className="mt-5 flex flex-wrap items-center gap-2">
         <button
           onClick={() => {
-            const el = textareaRef.current;
-            if (!el) return;
-            openLinkPicker(el.selectionStart, el.selectionEnd, null);
+            openLinkPickerForInsert(getSelectionRangeWithinEditor());
           }}
           className="inline-flex items-center gap-1.5 rounded-xl border border-blue-500/35 bg-blue-500/12 px-3 py-1.5 text-xs text-blue-100 hover:bg-blue-500/20"
         >
@@ -400,97 +507,80 @@ export function DocEditor({
         <div className="text-xs text-slate-400">Ctrl/Cmd+K inserts link when text is selected.</div>
       </div>
 
-      <div className="relative mt-3 min-h-[420px] rounded-3xl border border-slate-800/60 bg-slate-950/60 focus-within:ring-2 focus-within:ring-blue-500/35">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
-          <div
-            className="min-h-[420px] px-5 py-4 text-[15px] leading-7 text-slate-100 whitespace-pre-wrap break-words"
-            style={{ transform: `translate(${-editorScroll.left}px, ${-editorScroll.top}px)` }}
-          >
-            {content.length === 0 ? (
-              <span className="text-slate-500">Write here...</span>
-            ) : (
-              decoratedSegments.map((segment, idx) => {
-                if (segment.kind === 'text') {
-                  return <span key={`text-${idx}`}>{segment.text}</span>;
-                }
-
-                const link = segment.link;
-                if (!link.target) {
-                  return <span key={`malformed-${idx}`}>{link.raw}</span>;
-                }
-
-                if (link.target.type === 'external' || link.target.type === 'help') {
-                  return (
-                    <span
-                      key={`ext-${idx}`}
-                      className="font-medium text-sky-300 underline decoration-sky-300/70 underline-offset-4"
-                    >
-                      {link.label}
-                    </span>
-                  );
-                }
-
-                const chipLabel = internalChipLabel(link);
-                return (
-                  <span
-                    key={`chip-${idx}`}
-                    className="mx-0.5 inline-flex items-center gap-1 rounded-2xl border border-cyan-400/40 bg-cyan-500/14 px-2.5 py-1 text-[11px] font-medium text-cyan-100 align-middle shadow-[0_0_0_1px_rgba(34,211,238,0.1)]"
-                  >
-                    <span className="rounded-full border border-cyan-300/45 bg-cyan-400/16 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-cyan-100">
-                      {chipLabel}
-                    </span>
-                    <span>{link.label}</span>
-                  </span>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        <textarea
-          ref={textareaRef}
-          value={content}
+      <div className="relative mt-3 rounded-3xl border border-slate-800/60 bg-slate-950/60 px-5 py-4 focus-within:ring-2 focus-within:ring-blue-500/35">
+        {!content ? <div className="pointer-events-none text-slate-500">Write here...</div> : null}
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
           spellCheck={false}
-          onChange={(e) => {
-            const next = e.target.value;
-            setContent(next);
-            onContentChange(next);
-            clearHoverPreview();
+          data-link-editor="true"
+          aria-label="Document editor"
+          className="relative h-[420px] overflow-auto whitespace-pre-wrap break-words text-[15px] leading-7 text-slate-100 outline-none"
+          onInput={() => {
+            syncEditorToState();
+          }}
+          onPaste={(e) => {
+            e.preventDefault();
+            const text = e.clipboardData.getData('text/plain');
+            document.execCommand('insertText', false, text);
+            window.requestAnimationFrame(() => syncEditorToState());
           }}
           onKeyDown={(e) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-              const el = e.currentTarget;
-              if (el.selectionStart !== el.selectionEnd) {
+              const range = getSelectionRangeWithinEditor();
+              if (range && !range.collapsed) {
                 e.preventDefault();
-                openLinkPicker(el.selectionStart, el.selectionEnd, null);
+                openLinkPickerForInsert(range);
               }
+              return;
             }
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              document.execCommand('insertLineBreak');
+              window.requestAnimationFrame(() => syncEditorToState());
+            }
+          }}
+          onClick={(e) => {
+            const linkEl = (e.target as HTMLElement).closest('[data-link-node="true"]') as HTMLElement | null;
+            if (!linkEl) return;
+            const token = buildParsedLinkFromElement(linkEl);
+            if (!token?.target) return;
+            e.preventDefault();
+            if (token.target.type === 'external') {
+              window.open(token.target.url, '_blank', 'noopener,noreferrer');
+              return;
+            }
+            if (token.target.type === 'help') {
+              window.open('/help', '_blank', 'noopener,noreferrer');
+              return;
+            }
+            onActivateInternalLink?.(token);
           }}
           onContextMenu={(e) => {
             e.preventDefault();
-            const el = e.currentTarget;
-            const base = el.selectionStart === el.selectionEnd ? Math.max(0, el.selectionStart - 1) : el.selectionStart;
-            const token =
-              findMarkdownLinkAtClientPoint(el, content, e.clientX, e.clientY) || findLinkAtPosition(content, base);
+            const linkEl = (e.target as HTMLElement).closest('[data-link-node="true"]') as HTMLElement | null;
             setCtxMenu({
               x: e.clientX,
               y: e.clientY,
-              token,
-              start: el.selectionStart,
-              end: el.selectionEnd,
+              linkElement: linkEl,
             });
             clearHoverPreview();
           }}
           onMouseMove={(e) => {
-            const token = findMarkdownLinkAtClientPoint(e.currentTarget, content, e.clientX, e.clientY);
+            const linkEl = (e.target as HTMLElement).closest('[data-link-node="true"]') as HTMLElement | null;
+            if (!linkEl) {
+              clearHoverPreview();
+              return;
+            }
+            const token = buildParsedLinkFromElement(linkEl);
             if (!token) {
               clearHoverPreview();
               return;
             }
 
-            const tokenKey = `${token.start}:${token.end}:${token.href}`;
+            const tokenKey = `${token.href}:${token.label}`;
             hoverPointRef.current = { x: e.clientX, y: e.clientY };
-
             if (tokenKey === hoverTokenKeyRef.current) {
               if (hoverPreview) {
                 setHoverPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
@@ -516,16 +606,7 @@ export function DocEditor({
             }, 1000);
           }}
           onMouseLeave={clearHoverPreview}
-          onScroll={(e) => {
-            setEditorScroll({
-              top: e.currentTarget.scrollTop,
-              left: e.currentTarget.scrollLeft,
-            });
-            clearHoverPreview();
-          }}
-          data-link-editor="true"
-          aria-label="Document editor"
-          className="relative z-10 min-h-[420px] w-full resize-none rounded-3xl bg-transparent px-5 py-4 text-[15px] leading-7 text-transparent caret-slate-100 selection:bg-blue-500/30 focus:outline-none"
+          onScroll={clearHoverPreview}
         />
       </div>
 
@@ -543,27 +624,32 @@ export function DocEditor({
         open={!!ctxMenu}
         x={ctxMenu?.x || 0}
         y={ctxMenu?.y || 0}
-        canEdit={!!ctxMenu?.token?.target}
-        canRemove={!!ctxMenu?.token}
+        canEdit={!!ctxMenu?.linkElement && !!buildParsedLinkFromElement(ctxMenu.linkElement)?.target}
+        canRemove={!!ctxMenu?.linkElement}
         onClose={() => setCtxMenu(null)}
         onInsert={() => {
-          if (!ctxMenu) return;
-          openLinkPicker(ctxMenu.start, ctxMenu.end, null);
+          openLinkPickerForInsert(getSelectionRangeWithinEditor());
         }}
         onEdit={() => {
-          if (!ctxMenu?.token?.target) return;
+          if (!ctxMenu?.linkElement) return;
+          const token = buildParsedLinkFromElement(ctxMenu.linkElement);
+          if (!token?.target) return;
           setPendingRange({
-            start: ctxMenu.token.start,
-            end: ctxMenu.token.end,
-            initialTarget: ctxMenu.token.target,
+            mode: 'edit',
+            selectionRange: null,
+            linkElement: ctxMenu.linkElement,
+            initialTarget: token.target,
           });
-          setLinkPickerInitialLabel(ctxMenu.token.label);
+          setLinkPickerInitialLabel(token.label);
           setLinkPickerOpen(true);
         }}
         onRemove={() => {
-          if (!ctxMenu?.token) return;
-          const next = removeMarkdownLink(content, ctxMenu.token);
-          applyEditorContent(next, ctxMenu.token.start + ctxMenu.token.label.length);
+          if (!ctxMenu?.linkElement) return;
+          const label = ctxMenu.linkElement.textContent || '';
+          const replacement = document.createTextNode(label);
+          ctxMenu.linkElement.replaceWith(replacement);
+          setCaretAfterNode(replacement);
+          syncEditorToState();
         }}
       />
 
@@ -579,10 +665,37 @@ export function DocEditor({
         }}
         onSubmit={({ label, target }) => {
           if (!pendingRange) return;
-          const result = replaceSelectionWithLink(content, pendingRange.start, pendingRange.end, label, target);
-          applyEditorContent(result.nextContent, result.nextCursor);
+          if (pendingRange.mode === 'edit' && pendingRange.linkElement) {
+            pendingRange.linkElement.textContent = label;
+            pendingRange.linkElement.dataset.linkHref = buildLinkHref(target);
+            decorateLinkElement(pendingRange.linkElement, target);
+            setCaretAfterNode(pendingRange.linkElement);
+            syncEditorToState();
+          } else {
+            const editor = editorRef.current;
+            if (!editor) return;
+            const selection = window.getSelection();
+            const range = pendingRange.selectionRange && editor.contains(pendingRange.selectionRange.startContainer)
+              ? pendingRange.selectionRange
+              : (() => {
+                  const r = document.createRange();
+                  r.selectNodeContents(editor);
+                  r.collapse(false);
+                  return r;
+                })();
+            if (selection) {
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+            const node = createLinkNode(label, target);
+            range.deleteContents();
+            range.insertNode(node);
+            setCaretAfterNode(node);
+            syncEditorToState();
+          }
           setLinkPickerOpen(false);
           setPendingRange(null);
+          window.requestAnimationFrame(() => editorRef.current?.focus());
         }}
       />
     </div>
