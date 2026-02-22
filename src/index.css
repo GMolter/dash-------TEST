@@ -2,6 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: #020617;
+    color: #f8fafc;
+  }
+}
+
 @layer utilities {
   .scrollbar-theme {
     scrollbar-width: thin;

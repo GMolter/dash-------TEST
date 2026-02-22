@@ -76,13 +76,6 @@ type HoverPreviewState = {
   actionHint?: string;
 };
 
-type MdTipsLayout = {
-  top: number;
-  left: number;
-  width: number;
-  maxHeight: number;
-};
-
 function slugify(input: string) {
   return input
     .toLowerCase()
@@ -146,8 +139,8 @@ export default function Admin({ editorOnly = false }: AdminProps) {
   const articleHoverTokenKeyRef = useRef<string | null>(null);
   const articleHoverPointRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const mdTipsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mdTipsPanelRef = useRef<HTMLDivElement | null>(null);
   const [mdTipsOpen, setMdTipsOpen] = useState(false);
-  const [mdTipsLayout, setMdTipsLayout] = useState<MdTipsLayout | null>(null);
 
   const canSaveBanner = useMemo(() => {
     if (!banner.enabled) return true;
@@ -529,19 +522,23 @@ export default function Admin({ editorOnly = false }: AdminProps) {
   useEffect(() => {
     if (!mdTipsOpen) return;
 
-    const onResize = () => setMdTipsLayout(computeMdTipsLayout());
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMdTipsOpen(false);
     };
+    const onPointerDown = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      const insideButton = !!mdTipsButtonRef.current?.contains(target);
+      const insidePanel = !!mdTipsPanelRef.current?.contains(target);
+      if (!insideButton && !insidePanel) setMdTipsOpen(false);
+    };
 
-    window.addEventListener("resize", onResize);
-    window.addEventListener("scroll", onResize, true);
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("mousedown", onPointerDown);
 
     return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("scroll", onResize, true);
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("mousedown", onPointerDown);
     };
   }, [mdTipsOpen]);
 
@@ -554,32 +551,6 @@ export default function Admin({ editorOnly = false }: AdminProps) {
   function navigateTo(path: string) {
     window.history.pushState({}, "", path);
     window.dispatchEvent(new PopStateEvent("popstate"));
-  }
-
-  function computeMdTipsLayout(): MdTipsLayout | null {
-    const btn = mdTipsButtonRef.current;
-    if (!btn) return null;
-
-    const rect = btn.getBoundingClientRect();
-    const width = Math.min(460, Math.max(320, window.innerWidth - 16));
-    const maxHeight = Math.min(620, window.innerHeight - 20);
-    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
-    const preferredTop = rect.bottom + 8;
-    const top =
-      preferredTop + maxHeight > window.innerHeight - 8
-        ? Math.max(8, rect.top - maxHeight - 8)
-        : preferredTop;
-
-    return { top, left, width, maxHeight };
-  }
-
-  function toggleMdTips() {
-    if (mdTipsOpen) {
-      setMdTipsOpen(false);
-      return;
-    }
-    setMdTipsLayout(computeMdTipsLayout());
-    setMdTipsOpen(true);
   }
 
   async function login(e: React.FormEvent) {
@@ -1259,99 +1230,96 @@ export default function Admin({ editorOnly = false }: AdminProps) {
 
                   <div>
                     <label className="block text-sm text-slate-300">Content</label>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => {
-                          const el = articleTextareaRef.current;
-                          if (!el) return;
-                          openArticleLinkPicker(el.selectionStart, el.selectionEnd, null);
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/35 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100 hover:bg-blue-500/20"
-                      >
-                        <Link2 className="h-3.5 w-3.5" />
-                        Insert Link
-                      </button>
-                      <button
-                        onClick={() => formatArticleSelectionAsList("unordered")}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
-                      >
-                        <List className="h-3.5 w-3.5" />
-                        Unordered List
-                      </button>
-                      <button
-                        onClick={() => formatArticleSelectionAsList("ordered")}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
-                      >
-                        <ListOrdered className="h-3.5 w-3.5" />
-                        Ordered List
-                      </button>
-                      <button
-                        onClick={insertArticleHorizontalRule}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
-                      >
-                        <CornerDownLeft className="h-3.5 w-3.5" />
-                        Horizontal Line
-                      </button>
-                      <button
-                        ref={mdTipsButtonRef}
-                        onClick={toggleMdTips}
-                        className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-100 hover:bg-cyan-500/20"
-                      >
-                        <BookOpenText className="h-3.5 w-3.5" />
-                        MD Tips
-                      </button>
-                    </div>
-                    {mdTipsOpen && mdTipsLayout ? (
-                      <div
-                        className="fixed z-[95] rounded-2xl border border-slate-700/80 bg-slate-950/98 shadow-2xl backdrop-blur"
-                        style={{
-                          top: mdTipsLayout.top,
-                          left: mdTipsLayout.left,
-                          width: mdTipsLayout.width,
-                          maxHeight: mdTipsLayout.maxHeight,
-                        }}
-                      >
-                        <div className="flex items-center justify-between border-b border-slate-700/70 px-4 py-2.5">
-                          <div className="text-sm font-semibold text-slate-100">Markdown Tips</div>
-                          <button
-                            onClick={() => setMdTipsOpen(false)}
-                            className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
-                          >
-                            Close
-                          </button>
-                        </div>
-                        <div className="space-y-4 overflow-auto px-4 py-3 text-xs leading-5 text-slate-200">
-                          <section className="space-y-1">
-                            <div className="font-semibold text-slate-100">Headings</div>
-                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300"># Title{"\n"}## Section{"\n"}### Subsection</pre>
-                          </section>
-                          <section className="space-y-1">
-                            <div className="font-semibold text-slate-100">Text</div>
-                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">**bold**{"\n"}*italic*  _italic_{"\n"}***bold italic***{"\n"}~~strikethrough~~{"\n"}`inline code`{"\n"}&lt;u&gt;underline&lt;/u&gt;</pre>
-                          </section>
-                          <section className="space-y-1">
-                            <div className="font-semibold text-slate-100">Lists</div>
-                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">- item{"\n"}- item{"\n"}{"\n"}1. first{"\n"}2. second{"\n"}{"\n"}- [x] done{"\n"}- [ ] todo</pre>
-                          </section>
-                          <section className="space-y-1">
-                            <div className="font-semibold text-slate-100">Links</div>
-                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">[OpenAI](https://openai.com){"\n"}[Text](https://example.com "Title"){"\n"}&lt;https://example.com&gt;{"\n"}[Text][id]{"\n"}[id]: https://example.com</pre>
-                          </section>
-                          <section className="space-y-1">
-                            <div className="font-semibold text-slate-100">Code</div>
-                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">```ts{"\n"}const x = 1;{"\n"}```{"\n"}{"\n"}    indented code</pre>
-                          </section>
-                          <section className="space-y-1">
-                            <div className="font-semibold text-slate-100">Blocks</div>
-                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">&gt; quote{"\n"}&gt;&gt; nested quote{"\n"}{"\n"}---{"\n"}{"\n"}| Name | Age |{"\n"}| :--- | ---: |{"\n"}| Bob  | 25   |</pre>
-                          </section>
-                          <section className="space-y-1">
-                            <div className="font-semibold text-slate-100">Extended</div>
-                            <pre className="whitespace-pre-wrap rounded bg-slate-900/70 p-2 text-[11px] text-slate-300">\\*literal asterisk\\*{"\n"}[^1] footnote ref{"\n"}[^1]: Footnote text{"\n"}{"\n"}Term{"\n"}: Definition{"\n"}{"\n"}==highlight==  X^2^  H~2~O{"\n"}{"\n"}&lt;!-- hidden comment --&gt;{"\n"}&lt;details&gt;&lt;summary&gt;Click&lt;/summary&gt;Hidden&lt;/details&gt;</pre>
-                          </section>
-                        </div>
+                    <div className="relative mt-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const el = articleTextareaRef.current;
+                            if (!el) return;
+                            openArticleLinkPicker(el.selectionStart, el.selectionEnd, null);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-blue-500/35 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-100 hover:bg-blue-500/20"
+                        >
+                          <Link2 className="h-3.5 w-3.5" />
+                          Insert Link
+                        </button>
+                        <button
+                          onClick={() => formatArticleSelectionAsList("unordered")}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                        >
+                          <List className="h-3.5 w-3.5" />
+                          Unordered List
+                        </button>
+                        <button
+                          onClick={() => formatArticleSelectionAsList("ordered")}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                        >
+                          <ListOrdered className="h-3.5 w-3.5" />
+                          Ordered List
+                        </button>
+                        <button
+                          onClick={insertArticleHorizontalRule}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-800"
+                        >
+                          <CornerDownLeft className="h-3.5 w-3.5" />
+                          Horizontal Line
+                        </button>
+                        <button
+                          ref={mdTipsButtonRef}
+                          type="button"
+                          aria-expanded={mdTipsOpen}
+                          aria-controls="markdown-tips-popover"
+                          onClick={() => setMdTipsOpen((prev) => !prev)}
+                          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-cyan-500/35 bg-cyan-500/10 px-3 py-1.5 text-xs text-cyan-100 hover:bg-cyan-500/20"
+                        >
+                          <BookOpenText className="h-3.5 w-3.5" />
+                          MD Tips
+                        </button>
                       </div>
-                    ) : null}
+
+                      {mdTipsOpen ? (
+                        <div
+                          id="markdown-tips-popover"
+                          ref={mdTipsPanelRef}
+                          className="absolute right-0 top-full z-40 mt-2 w-[min(560px,calc(100vw-2.5rem))] overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-950/98 shadow-2xl"
+                        >
+                          <div className="flex items-center justify-between border-b border-slate-700/70 px-4 py-2.5">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-100">Markdown Tips</div>
+                              <div className="text-[11px] text-slate-400">Common patterns with copy-friendly examples.</div>
+                            </div>
+                            <button
+                              onClick={() => setMdTipsOpen(false)}
+                              className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                            >
+                              Close
+                            </button>
+                          </div>
+                          <div className="max-h-[65vh] space-y-3 overflow-y-auto p-3 text-xs text-slate-200">
+                            <section className="rounded-lg border border-slate-700/70 bg-slate-900/55 p-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300">Headings + Text</div>
+                              <pre className="whitespace-pre-wrap font-mono text-[12px] leading-5 text-slate-100"># Title{"\n"}## Section{"\n"}### Subsection{"\n\n"}**bold**{"\n"}*italic*  _italic_{"\n"}***bold italic***{"\n"}~~strikethrough~~{"\n"}`inline code`{"\n"}&lt;u&gt;underline&lt;/u&gt;</pre>
+                            </section>
+                            <section className="rounded-lg border border-slate-700/70 bg-slate-900/55 p-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300">Lists</div>
+                              <pre className="whitespace-pre-wrap font-mono text-[12px] leading-5 text-slate-100">- item{"\n"}- item{"\n"}  - subitem{"\n\n"}1. first{"\n"}2. second{"\n\n"}- [x] done{"\n"}- [ ] todo</pre>
+                            </section>
+                            <section className="rounded-lg border border-slate-700/70 bg-slate-900/55 p-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300">Links</div>
+                              <pre className="whitespace-pre-wrap font-mono text-[12px] leading-5 text-slate-100">[OpenAI](https://openai.com){"\n"}[Text](https://example.com "Title"){"\n"}&lt;https://example.com&gt;{"\n"}[Text][id]{"\n"}[id]: https://example.com</pre>
+                            </section>
+                            <section className="rounded-lg border border-slate-700/70 bg-slate-900/55 p-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300">Code + Quote + Rules</div>
+                              <pre className="whitespace-pre-wrap font-mono text-[12px] leading-5 text-slate-100">```ts{"\n"}const x = 1;{"\n"}```{"\n\n"}    indented code{"\n\n"}&gt; quote{"\n"}&gt;&gt; nested quote{"\n\n"}---</pre>
+                            </section>
+                            <section className="rounded-lg border border-slate-700/70 bg-slate-900/55 p-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-300">Tables + Extended</div>
+                              <pre className="whitespace-pre-wrap font-mono text-[12px] leading-5 text-slate-100">| Name | Age |{"\n"}| :--- | ---: |{"\n"}| Bob  | 25   |{"\n\n"}\\*literal asterisk\\*{"\n"}[^1] footnote ref{"\n"}[^1]: Footnote text{"\n\n"}Term{"\n"}: Definition{"\n\n"}==highlight==  X^2^  H~2~O{"\n\n"}&lt;!-- hidden comment --&gt;{"\n"}&lt;details&gt;&lt;summary&gt;Click&lt;/summary&gt;Hidden&lt;/details&gt;</pre>
+                            </section>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="mt-2 text-xs text-slate-400">
                       Ctrl/Cmd+K inserts links. Use heading syntax (example: <code>## Account Setup</code>) to create teleport targets. MD Tips stays open while you type.
                     </div>
