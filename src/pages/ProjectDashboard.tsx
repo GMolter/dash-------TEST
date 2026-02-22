@@ -35,7 +35,6 @@ import { FileTreePanel } from '../projectFiles/FileTreePanel';
 import { DocEditor } from '../projectFiles/DocEditor';
 import { NameModal } from '../projectFiles/NameModal';
 import { ContextMenu, ContextMenuItem } from '../projectFiles/ContextMenu';
-import type { ParsedMarkdownLink } from '../lib/linking';
 
 type Tab = 'overview' | 'board' | 'planner' | 'files' | 'resources';
 
@@ -252,45 +251,6 @@ export function ProjectDashboard({
     setTab('planner');
     setPlannerGenerateSignal((v) => v + 1);
   }
-
-  const handleDocInternalLink = useCallback(
-    (link: ParsedMarkdownLink) => {
-      const target = link.target;
-      if (!target) return;
-      if (
-        target.type !== 'project_file' &&
-        target.type !== 'project_resource' &&
-        target.type !== 'project_planner' &&
-        target.type !== 'project_board'
-      ) {
-        return;
-      }
-      if (target.projectId !== (projectId || '')) return;
-
-      if (target.type === 'project_file') {
-        navigateProjectTab('files');
-        setSelectedId(target.targetId);
-        setHighlightFileNodeId(target.targetId);
-        return;
-      }
-
-      if (target.type === 'project_resource') {
-        navigateProjectTab('resources');
-        setHighlightResourceId(target.targetId);
-        return;
-      }
-
-      if (target.type === 'project_planner') {
-        navigateProjectTab('planner');
-        setHighlightStepId(target.targetId);
-        return;
-      }
-
-      navigateProjectTab('board');
-      setHighlightCardId(target.targetId);
-    },
-    [projectId],
-  );
 
   async function projectApiFetch(url: string, init?: RequestInit) {
     const { data } = await supabase.auth.getSession();
@@ -1329,7 +1289,6 @@ export function ProjectDashboard({
                             prev ? { ...prev, updated_at: new Date().toISOString() } : prev,
                           );
                         }}
-                        onActivateInternalLink={handleDocInternalLink}
                       />
                     ) : (
                       <div className="rounded-3xl border border-slate-800/60 bg-slate-950/70 p-6">

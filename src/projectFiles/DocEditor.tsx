@@ -13,8 +13,7 @@ import {
 import { LinkPickerModal } from '../components/linking/LinkPickerModal';
 import { EditorContextMenu } from '../components/linking/EditorContextMenu';
 import { LinkHoverPreview } from '../components/linking/LinkHoverPreview';
-import { LinkedContent } from '../components/linking/renderLinkedContent';
-import type { LinkPickerOption, LinkResolvedMeta } from '../components/linking/types';
+import type { LinkPickerOption } from '../components/linking/types';
 
 type LinkDraftRange = {
   start: number;
@@ -72,14 +71,12 @@ export function DocEditor({
   onTitleChange,
   onContentChange,
   onSaved,
-  onActivateInternalLink,
 }: {
   projectId: string;
   doc: FileNode;
   onTitleChange: (name: string) => void;
   onContentChange: (content: string) => void;
   onSaved?: () => void;
-  onActivateInternalLink?: (link: ParsedMarkdownLink) => void;
 }) {
   const [title, setTitle] = useState(doc.name);
   const [content, setContent] = useState(doc.content || '');
@@ -89,7 +86,6 @@ export function DocEditor({
   const [pendingRange, setPendingRange] = useState<LinkDraftRange | null>(null);
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
-  const [isBodyEditing, setIsBodyEditing] = useState(false);
   const [fileTargets, setFileTargets] = useState<FileOption[]>([]);
   const [resourceTargets, setResourceTargets] = useState<ResourceOption[]>([]);
   const [plannerTargets, setPlannerTargets] = useState<PlannerOption[]>([]);
@@ -107,7 +103,6 @@ export function DocEditor({
     setContent(doc.content || '');
     lastSavedRef.current = doc.content || '';
     setSaved(true);
-    setIsBodyEditing(false);
   }, [doc.id, doc.name, doc.content]);
 
   useEffect(() => {
@@ -257,95 +252,9 @@ export function DocEditor({
 
   const status = useMemo(() => (saved ? 'Saved' : 'Saving...'), [saved]);
 
-  const resolveLinkedMeta = useMemo(() => {
-    const fileMap = new Map(fileTargets.map((item) => [item.id, item]));
-    const resourceMap = new Map(resourceTargets.map((item) => [item.id, item]));
-    const plannerMap = new Map(plannerTargets.map((item) => [item.id, item]));
-    const boardMap = new Map(boardTargets.map((item) => [item.id, item]));
-
-    return (link: ParsedMarkdownLink): LinkResolvedMeta => {
-      if (!link.target) return { exists: false, title: link.label, subtitle: 'Malformed reference' };
-
-      if (link.target.type === 'external') {
-        return { exists: true, title: link.label, subtitle: link.target.url };
-      }
-
-      if (link.target.type === 'help') {
-        return { exists: true, title: link.label, subtitle: `Help article ${link.target.articleId}` };
-      }
-
-      if (link.target.type === 'project_file') {
-        const item = fileMap.get(link.target.targetId);
-        if (!item) {
-          return {
-            exists: false,
-            title: link.label,
-            subtitle: 'Project file reference',
-            warning: 'This file is unavailable or was deleted.',
-          };
-        }
-        return {
-          exists: true,
-          title: item.name,
-          subtitle: item.type === 'upload' ? 'Project file' : 'Project document',
-        };
-      }
-
-      if (link.target.type === 'project_resource') {
-        const item = resourceMap.get(link.target.targetId);
-        if (!item) {
-          return {
-            exists: false,
-            title: link.label,
-            subtitle: 'Project resource reference',
-            warning: 'This resource is unavailable or was deleted.',
-          };
-        }
-        return {
-          exists: true,
-          title: item.title?.trim() || item.url,
-          subtitle: item.url,
-        };
-      }
-
-      if (link.target.type === 'project_planner') {
-        const item = plannerMap.get(link.target.targetId);
-        if (!item) {
-          return {
-            exists: false,
-            title: link.label,
-            subtitle: 'Planner task reference',
-            warning: 'This task is unavailable or was deleted.',
-          };
-        }
-        return {
-          exists: true,
-          title: item.title || '(Untitled task)',
-          subtitle: item.archived ? 'Archived planner task' : 'Planner task',
-        };
-      }
-
-      const item = boardMap.get(link.target.targetId);
-      if (!item) {
-        return {
-          exists: false,
-          title: link.label,
-          subtitle: 'Board task reference',
-          warning: 'This task is unavailable or was deleted.',
-        };
-      }
-      return {
-        exists: true,
-        title: item.title || '(Untitled card)',
-        subtitle: item.archived ? 'Archived board task' : 'Board task',
-      };
-    };
-  }, [fileTargets, resourceTargets, plannerTargets, boardTargets]);
-
   function applyEditorContent(next: string, nextCursor?: number) {
     setContent(next);
     onContentChange(next);
-    setIsBodyEditing(true);
     if (typeof nextCursor === 'number' && textareaRef.current) {
       window.requestAnimationFrame(() => {
         textareaRef.current?.focus();
@@ -468,18 +377,6 @@ export function DocEditor({
         <button
           onClick={() => {
             const el = textareaRef.current;
-            if (!isBodyEditing) {
-              setIsBodyEditing(true);
-              window.requestAnimationFrame(() => {
-                const focused = textareaRef.current;
-                if (!focused) return;
-                const end = focused.value.length;
-                focused.focus();
-                focused.setSelectionRange(end, end);
-                openLinkPicker(focused.selectionStart, focused.selectionEnd, null);
-              });
-              return;
-            }
             if (!el) return;
             openLinkPicker(el.selectionStart, el.selectionEnd, null);
           }}
@@ -488,131 +385,92 @@ export function DocEditor({
           <Link2 className="h-3.5 w-3.5" />
           Insert Link
         </button>
-        <button
-          onClick={() => {
-            if (isBodyEditing) {
-              setIsBodyEditing(false);
-              clearHoverPreview();
-              return;
-            }
-            setIsBodyEditing(true);
-            window.requestAnimationFrame(() => textareaRef.current?.focus());
-          }}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700/80 bg-slate-900/45 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-900/70"
-        >
-          {isBodyEditing ? 'View Linked Content' : 'Edit Raw Markdown'}
-        </button>
         <div className="text-xs text-slate-400">Ctrl/Cmd+K inserts link when text is selected.</div>
       </div>
 
-      {isBodyEditing ? (
-        <>
-          <textarea
-            ref={textareaRef}
-            value={content}
-            onChange={(e) => {
-              const next = e.target.value;
-              setContent(next);
-              onContentChange(next);
-              clearHoverPreview();
-            }}
-            onBlur={() => {
-              if (!linkPickerOpen && !ctxMenu) setIsBodyEditing(false);
-            }}
-            onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-                const el = e.currentTarget;
-                if (el.selectionStart !== el.selectionEnd) {
-                  e.preventDefault();
-                  openLinkPicker(el.selectionStart, el.selectionEnd, null);
-                }
-              }
-            }}
-            onContextMenu={(e) => {
+      <textarea
+        ref={textareaRef}
+        value={content}
+        onChange={(e) => {
+          const next = e.target.value;
+          setContent(next);
+          onContentChange(next);
+          clearHoverPreview();
+        }}
+        onKeyDown={(e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+            const el = e.currentTarget;
+            if (el.selectionStart !== el.selectionEnd) {
               e.preventDefault();
-              const el = e.currentTarget;
-              const base = el.selectionStart === el.selectionEnd ? Math.max(0, el.selectionStart - 1) : el.selectionStart;
-              const token =
-                findMarkdownLinkAtClientPoint(el, content, e.clientX, e.clientY) || findLinkAtPosition(content, base);
-              setCtxMenu({
-                x: e.clientX,
-                y: e.clientY,
-                token,
-                start: el.selectionStart,
-                end: el.selectionEnd,
-              });
-              clearHoverPreview();
-            }}
-            onMouseMove={(e) => {
-              const token = findMarkdownLinkAtClientPoint(e.currentTarget, content, e.clientX, e.clientY);
-              if (!token) {
-                clearHoverPreview();
-                return;
-              }
+              openLinkPicker(el.selectionStart, el.selectionEnd, null);
+            }
+          }
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const el = e.currentTarget;
+          const base = el.selectionStart === el.selectionEnd ? Math.max(0, el.selectionStart - 1) : el.selectionStart;
+          const token =
+            findMarkdownLinkAtClientPoint(el, content, e.clientX, e.clientY) || findLinkAtPosition(content, base);
+          setCtxMenu({
+            x: e.clientX,
+            y: e.clientY,
+            token,
+            start: el.selectionStart,
+            end: el.selectionEnd,
+          });
+          clearHoverPreview();
+        }}
+        onMouseMove={(e) => {
+          const token = findMarkdownLinkAtClientPoint(e.currentTarget, content, e.clientX, e.clientY);
+          if (!token) {
+            clearHoverPreview();
+            return;
+          }
 
-              const tokenKey = `${token.start}:${token.end}:${token.href}`;
-              hoverPointRef.current = { x: e.clientX, y: e.clientY };
+          const tokenKey = `${token.start}:${token.end}:${token.href}`;
+          hoverPointRef.current = { x: e.clientX, y: e.clientY };
 
-              if (tokenKey === hoverTokenKeyRef.current) {
-                if (hoverPreview) {
-                  setHoverPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
-                }
-                return;
-              }
+          if (tokenKey === hoverTokenKeyRef.current) {
+            if (hoverPreview) {
+              setHoverPreview((prev) => (prev ? { ...prev, x: e.clientX, y: e.clientY } : prev));
+            }
+            return;
+          }
 
-              if (hoverTimerRef.current) {
-                window.clearTimeout(hoverTimerRef.current);
-                hoverTimerRef.current = null;
-              }
+          if (hoverTimerRef.current) {
+            window.clearTimeout(hoverTimerRef.current);
+            hoverTimerRef.current = null;
+          }
 
-              hoverTokenKeyRef.current = tokenKey;
-              setHoverPreview(null);
-              const nextPreview = buildHoverPreview(token);
-              hoverTimerRef.current = window.setTimeout(() => {
-                setHoverPreview({
-                  ...nextPreview,
-                  x: hoverPointRef.current.x,
-                  y: hoverPointRef.current.y,
-                });
-                hoverTimerRef.current = null;
-              }, 1000);
-            }}
-            onMouseLeave={clearHoverPreview}
-            onScroll={clearHoverPreview}
-            data-link-editor="true"
-            placeholder="Write here..."
-            className="mt-3 min-h-[420px] w-full resize-none rounded-3xl border border-slate-800/60 bg-slate-950/60 px-5 py-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
-          />
+          hoverTokenKeyRef.current = tokenKey;
+          setHoverPreview(null);
+          const nextPreview = buildHoverPreview(token);
+          hoverTimerRef.current = window.setTimeout(() => {
+            setHoverPreview({
+              ...nextPreview,
+              x: hoverPointRef.current.x,
+              y: hoverPointRef.current.y,
+            });
+            hoverTimerRef.current = null;
+          }, 1000);
+        }}
+        onMouseLeave={clearHoverPreview}
+        onScroll={clearHoverPreview}
+        data-link-editor="true"
+        placeholder="Write here..."
+        className="mt-3 min-h-[420px] w-full resize-none rounded-3xl border border-slate-800/60 bg-slate-950/60 px-5 py-4 text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/35"
+      />
 
-          <LinkHoverPreview
-            visible={!!hoverPreview}
-            x={hoverPreview?.x || 0}
-            y={hoverPreview?.y || 0}
-            title={hoverPreview?.title || ''}
-            subtitle={hoverPreview?.subtitle}
-            warning={hoverPreview?.warning}
-            actionHint={hoverPreview?.actionHint}
-          />
-        </>
-      ) : (
-        <div
-          onClick={(e) => {
-            const target = e.target as HTMLElement;
-            if (target.closest('[data-linked-content-link="true"]')) return;
-            setIsBodyEditing(true);
-            window.requestAnimationFrame(() => textareaRef.current?.focus());
-          }}
-          className="mt-3 w-full rounded-3xl border border-slate-800/60 bg-slate-950/60 px-5 py-4 text-left transition-colors hover:border-blue-500/30 hover:bg-slate-950/72"
-        >
-          <LinkedContent
-            content={content}
-            className="min-h-[420px] text-sm leading-7 text-slate-100 whitespace-pre-wrap"
-            resolveMeta={resolveLinkedMeta}
-            onActivateInternalLink={onActivateInternalLink}
-          />
-          <div className="mt-3 text-xs text-slate-400">Click anywhere to edit raw markdown.</div>
-        </div>
-      )}
+      <LinkHoverPreview
+        visible={!!hoverPreview}
+        x={hoverPreview?.x || 0}
+        y={hoverPreview?.y || 0}
+        title={hoverPreview?.title || ''}
+        subtitle={hoverPreview?.subtitle}
+        warning={hoverPreview?.warning}
+        actionHint={hoverPreview?.actionHint}
+      />
 
       <EditorContextMenu
         open={!!ctxMenu}
