@@ -41,7 +41,7 @@ export function LauncherDevices({ repository }: { repository?: LauncherDeviceRep
         </button>
       </div>
       <p className="mt-2 text-sm text-slate-400">
-        Remove a launcher to revoke its access immediately. Connected launchers can read your private Quick Pastes but cannot manage or share them.
+        Remove a launcher to revoke its access immediately. Connected launchers can read your private Quick Pastes and, when enabled, today’s Google Calendar schedule, but cannot manage or share them.
       </p>
 
       {state.loading && <div className="mt-4 text-sm text-slate-300" role="status">Loading launcher devices…</div>}

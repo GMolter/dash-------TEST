@@ -71,7 +71,10 @@ Logs rotate at 1 MiB and are not an export or support bundle.
 
 ## Deferred features
 
-Send to Phone and Network Analyzer remain disabled and execute no behavior. Milestone 7
+Calendar replaces Send to Phone with read-only, owner-bound schedule access. Google refresh
+tokens remain encrypted in Workstation; the launcher keeps only the current day's bounded
+event view in a Windows DPAPI-encrypted, device-bound cache and deletes stale or disconnected
+cache data. Network Analyzer remains disabled and executes no behavior. Milestone 7
 adds no packaging, installer, updater, organization sharing, backend endpoint, database
 migration, service-role key, or thirteenth Vercel function. The hard-delete launcher
 device migration remains the latest database rule:

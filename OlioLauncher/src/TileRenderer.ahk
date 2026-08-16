@@ -24,7 +24,7 @@ class TileRenderer {
 
     static RegisterSettingsButton(control, accentRgb := 0xFBBF24, enabled := true) {
         return this.RegisterUtilityButton(control, "Settings", "settings-2",
-            accentRgb, enabled, false)
+            accentRgb, enabled, true)
     }
 
     static RegisterUtilityButton(control, title, iconKind, accentRgb,
@@ -88,7 +88,10 @@ class TileRenderer {
             if result
                 return result
             result := ClipboardRenderer.DrawItem(lParam)
-            return result ? result : QuickPastesRenderer.DrawItem(lParam)
+            if result
+                return result
+            result := QuickPastesRenderer.DrawItem(lParam)
+            return result ? result : CalendarRenderer.DrawItem(lParam)
         }
         catch as drawError {
             this.LastDrawError := Type(drawError) ": " drawError.Message
@@ -118,36 +121,42 @@ class TileRenderer {
         hovered := itemHwnd = this.HoveredHwnd
         accent := ThemeManager.HighContrast ? ThemeManager.Color("Text") : tile.Accent
         background := disabled ? ThemeManager.Color("DisabledSurface")
-            : pressed ? ThemeManager.Color("SurfacePressed")
-            : tile.Selected ? ThemeManager.Color("SurfaceSelected")
-            : hovered ? ThemeManager.Color("SurfaceHover")
-            : ThemeManager.Color("Surface")
+            : pressed ? ThemeManager.Color("LauncherSurfacePressed")
+            : tile.Selected ? ThemeManager.Color("LauncherSurfaceSelected")
+            : hovered ? ThemeManager.Color("LauncherSurfaceHover")
+            : ThemeManager.Color("LauncherSurface")
         if tile.Icon && !disabled
-            background := pressed ? ThemeManager.Color("SurfacePressed")
-                : tile.Selected ? ThemeManager.Color("SurfaceSelected")
-                : hovered ? ThemeManager.Color("SurfaceHover")
-                : ThemeManager.Color("Surface")
+            background := pressed ? ThemeManager.Color("LauncherSurfacePressed")
+                : tile.Selected ? ThemeManager.Color("LauncherSurfaceSelected")
+                : hovered ? ThemeManager.Color("LauncherSurfaceHover")
+                : ThemeManager.Color("LauncherSurface")
         if (tile.IconKind = "settings-2" || tile.IconKind = "arrow-left") && !disabled
-            background := ThemeManager.Color("Surface")
-        parentBackground := ThemeManager.Color("Window")
+            background := ThemeManager.Color("LauncherSurface")
+        parentBackground := ThemeManager.Color("LauncherWindow")
 
         this.FillRect(hdc, left, top, right, bottom, parentBackground)
-        radius := tile.Icon ? Max(10, Floor((bottom - top) / 2))
-            : Max(10, Round(16 * this.WindowDpi(itemHwnd) / 96))
-        this.FillRounded(hdc, left, top, right, bottom, radius, background)
+        radius := Max(10, Round(12 * this.WindowDpi(itemHwnd) / 96))
+        if !ThemeManager.HighContrast
+            this.FillRounded(hdc, left + 1, top + 2, right - 1, bottom,
+                radius, ThemeManager.Color("LauncherShadow"))
+        this.FillRounded(hdc, left, top, right, bottom - 1, radius, background)
 
         dpi := this.WindowDpi(itemHwnd)
         borderColor := disabled ? ThemeManager.Color("MutedBorder")
-            : tile.Selected ? accent
-            : hovered ? ThemeManager.Color("Border")
-            : ThemeManager.Color("MutedBorder")
+            : tile.Selected ? this.BlendRgb(accent,
+                ThemeManager.Color("LauncherBorder"), 0.58)
+            : hovered ? ThemeManager.Color("LauncherHighlight")
+            : ThemeManager.Color("LauncherBorder")
         if tile.Icon && !disabled
             borderColor := (focused || tile.Selected) ? accent
                 : hovered ? this.BlendRgb(accent,
                     ThemeManager.Color("MutedBorder"), 0.45)
-                : ThemeManager.Color("Border")
-        this.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 1,
+                : ThemeManager.Color("LauncherBorder")
+        this.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 2,
             radius, borderColor, Max(1, Round(dpi / 96)))
+        if !ThemeManager.HighContrast && !pressed && !tile.Selected
+            this.StrokeRounded(hdc, left + 2, top + 2, right - 2, bottom - 3,
+                radius, ThemeManager.Color("LauncherHighlight"), 1)
 
         if tile.Icon {
             iconColor := disabled ? ThemeManager.Color("DisabledText") : accent
@@ -171,8 +180,8 @@ class TileRenderer {
                 finally DllCall("DeleteObject", "ptr", labelFont)
             }
             if focused && !disabled
-                this.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 1,
-                    radius, accent, Max(1, Round(2 * dpi / 96)))
+                this.StrokeRounded(hdc, left + 2, top + 2, right - 2, bottom - 3,
+                    radius, accent, Max(1, Round(dpi / 96)))
             return true
         }
 
@@ -207,8 +216,8 @@ class TileRenderer {
         }
 
         if focused && !disabled
-            this.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 1,
-                radius, accent, Max(1, Round(2 * dpi / 96)))
+            this.StrokeRounded(hdc, left + 2, top + 2, right - 2, bottom - 3,
+                radius, accent, Max(1, Round(dpi / 96)))
         return true
     }
 

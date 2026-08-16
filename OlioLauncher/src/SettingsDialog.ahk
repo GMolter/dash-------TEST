@@ -10,7 +10,7 @@ class SettingsTooltips {
             "ptr", gui.Hwnd, "ptr", 0, "ptr", 0, "ptr", 0, "ptr")
         if this.Hwnd {
             DllCall("SendMessageW", "ptr", this.Hwnd, "uint", 0x0418,
-                "ptr", 0, "ptr", 380)
+                "ptr", 0, "ptr", 420)
             DllCall("SetWindowPos", "ptr", this.Hwnd, "ptr", -1,
                 "int", 0, "int", 0, "int", 0, "int", 0,
                 "uint", 0x0001 | 0x0002 | 0x0010)
@@ -49,13 +49,19 @@ class SettingsTooltips {
 class SettingsRenderer {
     static Items := Map()
     static HoveredHwnd := 0
+    static AnimationTimer := 0
 
     static Register(control, kind, title, subtitle := "", accent := 0x38BDF8,
-        state := false, selected := false, enabled := true) {
+        state := false, selected := false, enabled := true, glyph := "") {
         TileRenderer.Initialize()
+        stateValue := state ? 1.0 : 0.0
+        selectedValue := selected ? 1.0 : 0.0
         this.Items[control.Hwnd] := {
             Kind: kind, Title: title, Subtitle: subtitle, Accent: accent,
-            State: !!state, Selected: !!selected, Enabled: !!enabled
+            State: !!state, Selected: !!selected, Enabled: !!enabled,
+            Glyph: glyph, Value: "", HoverProgress: 0.0, HoverTarget: 0.0,
+            StateProgress: stateValue, StateTarget: stateValue,
+            SelectedProgress: selectedValue, SelectedTarget: selectedValue
         }
         control.Enabled := enabled
     }
@@ -65,23 +71,74 @@ class SettingsRenderer {
             return
         item := this.Items[control.Hwnd]
         item.State := !!state
-        control.Text := item.Title " — " (item.State ? "On" : "Off")
-        DllCall("InvalidateRect", "ptr", control.Hwnd, "ptr", 0, "int", true)
+        item.StateTarget := item.State ? 1.0 : 0.0
+        control.Text := item.Title " - " (item.State ? "On" : "Off")
+        this.StartAnimation(item, control.Hwnd)
     }
 
     static SetSelected(control, selected) {
+        if !IsObject(control) || !this.Items.Has(control.Hwnd)
+            return
+        item := this.Items[control.Hwnd]
+        item.Selected := !!selected
+        item.SelectedTarget := item.Selected ? 1.0 : 0.0
+        this.StartAnimation(item, control.Hwnd)
+    }
+
+    static SetValue(control, value) {
         if !this.Items.Has(control.Hwnd)
             return
-        this.Items[control.Hwnd].Selected := !!selected
+        this.Items[control.Hwnd].Value := value
         DllCall("InvalidateRect", "ptr", control.Hwnd, "ptr", 0, "int", true)
     }
 
     static SetEnabled(control, enabled) {
         if !this.Items.Has(control.Hwnd)
             return
-        this.Items[control.Hwnd].Enabled := !!enabled
+        item := this.Items[control.Hwnd]
+        item.Enabled := !!enabled
         control.Enabled := enabled
         DllCall("InvalidateRect", "ptr", control.Hwnd, "ptr", 0, "int", true)
+    }
+
+    static StartAnimation(item, hwnd) {
+        if ThemeManager.ReducedMotion {
+            item.HoverProgress := item.HoverTarget
+            item.StateProgress := item.StateTarget
+            item.SelectedProgress := item.SelectedTarget
+            DllCall("InvalidateRect", "ptr", hwnd, "ptr", 0, "int", true)
+            return
+        }
+        if !IsObject(this.AnimationTimer)
+            this.AnimationTimer := ObjBindMethod(this, "AnimateFrame")
+        SetTimer(this.AnimationTimer, 16)
+        DllCall("InvalidateRect", "ptr", hwnd, "ptr", 0, "int", true)
+    }
+
+    static AnimateFrame(*) {
+        active := false
+        for hwnd, item in this.Items {
+            changed := false
+            for pair in [
+                ["HoverProgress", "HoverTarget"],
+                ["StateProgress", "StateTarget"],
+                ["SelectedProgress", "SelectedTarget"]
+            ] {
+                current := item.%pair[1]%
+                target := item.%pair[2]%
+                if Abs(target - current) < 0.015
+                    item.%pair[1]% := target
+                else {
+                    item.%pair[1]% := current + (target - current) * 0.34
+                    changed := true
+                    active := true
+                }
+            }
+            if changed
+                try DllCall("InvalidateRect", "ptr", hwnd, "ptr", 0, "int", false)
+        }
+        if !active && IsObject(this.AnimationTimer)
+            SetTimer(this.AnimationTimer, 0)
     }
 
     static Unregister(control) {
@@ -90,6 +147,8 @@ class SettingsRenderer {
             this.Items.Delete(hwnd)
         if this.HoveredHwnd = hwnd
             this.HoveredHwnd := 0
+        if !this.Items.Count && IsObject(this.AnimationTimer)
+            SetTimer(this.AnimationTimer, 0)
     }
 
     static DrawItem(drawInfo) {
@@ -110,121 +169,279 @@ class SettingsRenderer {
         disabled := !item.Enabled || (state & 0x4)
         pressed := state & 0x1
         focused := state & 0x10
-        hovered := itemHwnd = this.HoveredHwnd
         dpi := TileRenderer.WindowDpi(itemHwnd)
         accent := ThemeManager.HighContrast ? ThemeManager.Color("Text") : item.Accent
-        TileRenderer.FillRect(hdc, left, top, right, bottom,
-            ThemeManager.Color("Window"))
 
         switch item.Kind {
+            case "brand":
+                this.DrawBrand(hdc, left, top, right, bottom, dpi)
+            case "sidebarHint":
+                this.DrawSidebarHint(hdc, left, top, right, bottom, dpi)
+            case "nav":
+                this.DrawNavigation(hdc, item, left, top, right, bottom, dpi,
+                    focused, disabled, accent)
             case "toggle":
-                background := disabled ? ThemeManager.Color("DisabledSurface")
-                    : pressed ? ThemeManager.Color("SurfacePressed")
-                    : hovered ? ThemeManager.Color("SurfaceHover")
-                    : ThemeManager.Color("Surface")
-                TileRenderer.FillRounded(hdc, left, top, right, bottom,
-                    Round(12 * dpi / 96), background)
-                border := focused ? accent : hovered
-                    ? ThemeManager.Color("Border") : ThemeManager.Color("MutedBorder")
-                TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1,
-                    bottom - 1, Round(12 * dpi / 96), border,
-                    focused ? Max(2, Round(2 * dpi / 96)) : 1)
-                this.DrawToggle(hdc, item, left, top, right, bottom, dpi, disabled,
-                    accent)
-            case "tab":
-                background := item.Selected ? ThemeManager.Color("SurfaceSelected")
-                    : hovered ? ThemeManager.Color("SurfaceHover")
-                    : ThemeManager.Color("Window")
-                TileRenderer.FillRounded(hdc, left, top, right, bottom,
-                    Round(10 * dpi / 96), background)
-                if item.Selected
-                    TileRenderer.FillRounded(hdc, left + Round(12 * dpi / 96),
-                        bottom - Max(3, Round(3 * dpi / 96)),
-                        right - Round(12 * dpi / 96), bottom,
-                        Max(2, Round(2 * dpi / 96)), accent)
-                this.DrawCentered(hdc, item.Title, left, top, right, bottom, dpi,
-                    item.Selected ? accent : ThemeManager.Color("MutedText"), 600)
-                if focused
-                    TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1,
-                        bottom - 1, Round(10 * dpi / 96), accent,
-                        Max(2, Round(2 * dpi / 96)))
-            case "more":
-                background := hovered ? ThemeManager.Color("SurfaceHover")
-                    : ThemeManager.Color("Window")
-                TileRenderer.FillRounded(hdc, left, top, right, bottom,
-                    Round(12 * dpi / 96), background)
-                this.DrawCentered(hdc, "•••", left, top - Round(4 * dpi / 96),
-                    right, bottom, dpi, ThemeManager.Color("MutedText"), 600)
-                if focused
-                    TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1,
-                        bottom - 1, Round(12 * dpi / 96), accent,
-                        Max(2, Round(2 * dpi / 96)))
+                this.DrawToggle(hdc, item, left, top, right, bottom, dpi,
+                    focused, pressed, disabled, accent)
+            case "segment":
+                this.DrawSegment(hdc, item, left, top, right, bottom, dpi,
+                    focused, pressed, disabled, accent)
+            case "placement":
+                this.DrawPlacement(hdc, item, left, top, right, bottom, dpi,
+                    focused, pressed, disabled, accent)
+            case "hotkey":
+                this.DrawHotkey(hdc, item, left, top, right, bottom, dpi,
+                    focused, pressed, disabled, accent)
+            case "danger":
+                this.DrawAction(hdc, item, left, top, right, bottom, dpi,
+                    focused, pressed, disabled, 0xF87171, false)
             default:
-                background := disabled ? ThemeManager.Color("DisabledSurface")
-                    : pressed ? ThemeManager.Color("SurfacePressed")
-                    : item.Selected ? accent
-                    : hovered ? ThemeManager.Color("SurfaceHover")
-                    : ThemeManager.Color("Surface")
-                TileRenderer.FillRounded(hdc, left, top, right, bottom,
-                    Round(10 * dpi / 96), background)
-                textColor := disabled ? ThemeManager.Color("DisabledText")
-                    : item.Selected ? ThemeManager.Color("Window")
-                    : ThemeManager.Color("Text")
-                this.DrawCentered(hdc, item.Title, left, top, right, bottom,
-                    dpi, textColor, 600)
-                border := focused ? accent : ThemeManager.Color("MutedBorder")
-                TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1,
-                    bottom - 1, Round(10 * dpi / 96), border,
-                    focused ? Max(2, Round(2 * dpi / 96)) : 1)
+                this.DrawAction(hdc, item, left, top, right, bottom, dpi,
+                    focused, pressed, disabled, accent, item.Selected)
         }
         return true
     }
 
-    static DrawToggle(hdc, item, left, top, right, bottom, dpi, disabled, accent) {
+    static DrawBrand(hdc, left, top, right, bottom, dpi) {
+        background := ThemeManager.Color("Sidebar", ThemeManager.Color("Window"))
+        TileRenderer.FillRect(hdc, left, top, right, bottom, background)
+        brandFont := TileRenderer.CreateFont(16, 700, dpi,
+            "Segoe UI Variable Display")
+        captionFont := TileRenderer.CreateFont(8, 400, dpi)
+        try {
+            TileRenderer.DrawText(hdc, "Olio", brandFont, ThemeManager.Color("Text"),
+                left, top, right, top + Round(29 * dpi / 96))
+            TileRenderer.DrawText(hdc, "LAUNCHER SETTINGS", captionFont,
+                ThemeManager.Color("MutedText"), left, top + Round(27 * dpi / 96),
+                right, bottom)
+        } finally {
+            DllCall("DeleteObject", "ptr", brandFont)
+            DllCall("DeleteObject", "ptr", captionFont)
+        }
+    }
+
+    static DrawSidebarHint(hdc, left, top, right, bottom, dpi) {
+        TileRenderer.FillRect(hdc, left, top, right, bottom,
+            ThemeManager.Color("Sidebar", ThemeManager.Color("Window")))
+        font := TileRenderer.CreateFont(8, 400, dpi)
+        try TileRenderer.DrawText(hdc, "Every change saves`nautomatically.", font,
+            ThemeManager.Color("MutedText"), left, top, right, bottom,
+            0x00000010 | 0x00000800)
+        finally DllCall("DeleteObject", "ptr", font)
+    }
+
+    static DrawNavigation(hdc, item, left, top, right, bottom, dpi,
+        focused, disabled, accent) {
+        base := ThemeManager.Color("Sidebar", ThemeManager.Color("Window"))
+        hoverColor := ThemeManager.Color("SurfaceHover")
+        selectedColor := ThemeManager.Color("SurfaceSelected")
+        background := TileRenderer.BlendRgb(hoverColor, base, item.HoverProgress)
+        background := TileRenderer.BlendRgb(selectedColor, background,
+            item.SelectedProgress)
+        TileRenderer.FillRect(hdc, left, top, right, bottom, base)
+        TileRenderer.FillRounded(hdc, left, top, right, bottom,
+            Round(10 * dpi / 96), background)
+        railWidth := Max(3, Round(3 * dpi / 96))
+        railHeight := Round((14 + 16 * item.SelectedProgress) * dpi / 96)
+        railTop := top + Floor((bottom - top - railHeight) / 2)
+        if item.SelectedProgress > 0.02
+            TileRenderer.FillRounded(hdc, left, railTop, left + railWidth,
+                railTop + railHeight, railWidth, accent)
+        iconColor := disabled ? ThemeManager.Color("DisabledText")
+            : TileRenderer.BlendRgb(accent, ThemeManager.Color("MutedText"),
+                item.SelectedProgress)
+        iconFont := TileRenderer.CreateFont(11, 400, dpi, "Segoe Fluent Icons")
+        textFont := TileRenderer.CreateFont(9, item.Selected ? 600 : 400, dpi)
+        try {
+            TileRenderer.DrawText(hdc, item.Glyph, iconFont, iconColor,
+                left + Round(14 * dpi / 96), top,
+                left + Round(42 * dpi / 96), bottom)
+            TileRenderer.DrawText(hdc, item.Title, textFont,
+                disabled ? ThemeManager.Color("DisabledText")
+                    : ThemeManager.Color("Text"),
+                left + Round(44 * dpi / 96), top, right - Round(8 * dpi / 96), bottom,
+                0x00000004 | 0x00000020 | 0x00000800)
+        } finally {
+            DllCall("DeleteObject", "ptr", iconFont)
+            DllCall("DeleteObject", "ptr", textFont)
+        }
+        if focused && !disabled
+            TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1,
+                bottom - 1, Round(10 * dpi / 96), accent,
+                Max(2, Round(2 * dpi / 96)))
+    }
+
+    static DrawToggle(hdc, item, left, top, right, bottom, dpi,
+        focused, pressed, disabled, accent) {
+        this.DrawRowBackground(hdc, item, left, top, right, bottom, dpi,
+            focused, pressed, disabled, accent)
         titleFont := TileRenderer.CreateFont(10, 600, dpi)
         subtitleFont := TileRenderer.CreateFont(8, 400, dpi)
         textLeft := left + Round(16 * dpi / 96)
-        textRight := right - Round(74 * dpi / 96)
-        titleColor := disabled ? ThemeManager.Color("DisabledText")
-            : ThemeManager.Color("Text")
-        subtitleColor := disabled ? ThemeManager.Color("DisabledText")
-            : ThemeManager.Color("MutedText")
+        textRight := right - Round(82 * dpi / 96)
         try {
-            TileRenderer.DrawText(hdc, item.Title, titleFont, titleColor,
-                textLeft, top + Round(8 * dpi / 96), textRight,
-                top + Round(30 * dpi / 96))
-            TileRenderer.DrawText(hdc, item.Subtitle, subtitleFont, subtitleColor,
-                textLeft, top + Round(30 * dpi / 96), textRight,
-                bottom - Round(5 * dpi / 96),
-                0x00000010 | 0x00000800) ; DT_WORDBREAK | DT_NOPREFIX
+            TileRenderer.DrawText(hdc, item.Title, titleFont,
+                disabled ? ThemeManager.Color("DisabledText") : ThemeManager.Color("Text"),
+                textLeft, top + Round(7 * dpi / 96), textRight,
+                top + Round(31 * dpi / 96))
+            if item.Subtitle
+                TileRenderer.DrawText(hdc, item.Subtitle, subtitleFont,
+                    disabled ? ThemeManager.Color("DisabledText")
+                        : ThemeManager.Color("MutedText"),
+                    textLeft, top + Round(29 * dpi / 96), textRight,
+                    bottom - Round(5 * dpi / 96), 0x00000010 | 0x00000800)
         } finally {
             DllCall("DeleteObject", "ptr", titleFont)
             DllCall("DeleteObject", "ptr", subtitleFont)
         }
         switchWidth := Round(42 * dpi / 96)
-        switchHeight := Round(23 * dpi / 96)
+        switchHeight := Round(22 * dpi / 96)
         switchRight := right - Round(16 * dpi / 96)
         switchLeft := switchRight - switchWidth
         switchTop := top + Floor((bottom - top - switchHeight) / 2)
-        switchColor := item.State && !disabled ? accent
-            : ThemeManager.Color("DisabledSurface")
+        offColor := ThemeManager.Color("DisabledSurface")
+        switchColor := disabled ? offColor
+            : TileRenderer.BlendRgb(accent, offColor, item.StateProgress)
         TileRenderer.FillRounded(hdc, switchLeft, switchTop, switchRight,
             switchTop + switchHeight, switchHeight, switchColor)
         knobSize := switchHeight - Round(6 * dpi / 96)
-        knobLeft := item.State
-            ? switchRight - knobSize - Round(3 * dpi / 96)
-            : switchLeft + Round(3 * dpi / 96)
-        TileRenderer.FillRounded(hdc, knobLeft,
-            switchTop + Round(3 * dpi / 96), knobLeft + knobSize,
-            switchTop + Round(3 * dpi / 96) + knobSize, knobSize,
-            disabled ? ThemeManager.Color("DisabledText") : 0xFFFFFF)
+        travel := switchWidth - knobSize - Round(6 * dpi / 96)
+        knobLeft := switchLeft + Round(3 * dpi / 96)
+            + Round(travel * item.StateProgress)
+        TileRenderer.FillRounded(hdc, knobLeft, switchTop + Round(3 * dpi / 96),
+            knobLeft + knobSize, switchTop + Round(3 * dpi / 96) + knobSize,
+            knobSize, disabled ? ThemeManager.Color("DisabledText") : 0xFFFFFF)
     }
 
-    static DrawCentered(hdc, text, left, top, right, bottom, dpi, color, weight) {
-        font := TileRenderer.CreateFont(9, weight, dpi)
-        try TileRenderer.DrawText(hdc, text, font, color, left, top, right, bottom,
+    static DrawSegment(hdc, item, left, top, right, bottom, dpi,
+        focused, pressed, disabled, accent) {
+        base := ThemeManager.Color("SurfaceElevated", ThemeManager.Color("Surface"))
+        hover := ThemeManager.Color("SurfaceHover")
+        selected := accent
+        background := TileRenderer.BlendRgb(hover, base, item.HoverProgress)
+        background := TileRenderer.BlendRgb(selected, background,
+            item.SelectedProgress)
+        if pressed
+            background := ThemeManager.Color("SurfacePressed")
+        TileRenderer.FillRect(hdc, left, top, right, bottom, ThemeManager.Color("Window"))
+        TileRenderer.FillRounded(hdc, left, top, right, bottom,
+            Round(9 * dpi / 96), background)
+        border := focused ? accent : item.Selected
+            ? accent : ThemeManager.Color("MutedBorder")
+        TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 1,
+            Round(9 * dpi / 96), border, focused ? Max(2, Round(2 * dpi / 96)) : 1)
+        font := TileRenderer.CreateFont(9, item.Selected ? 600 : 400, dpi)
+        try TileRenderer.DrawText(hdc, item.Title, font,
+            disabled ? ThemeManager.Color("DisabledText")
+                : item.Selected ? ThemeManager.Color("Window") : ThemeManager.Color("Text"),
+            left, top, right, bottom,
             0x00000001 | 0x00000004 | 0x00000020 | 0x00000800)
         finally DllCall("DeleteObject", "ptr", font)
+    }
+
+    static DrawPlacement(hdc, item, left, top, right, bottom, dpi,
+        focused, pressed, disabled, accent) {
+        base := ThemeManager.Color("SurfaceElevated", ThemeManager.Color("Surface"))
+        selected := TileRenderer.BlendRgb(accent, base, 0.22)
+        background := TileRenderer.BlendRgb(selected, base, item.SelectedProgress)
+        if pressed
+            background := ThemeManager.Color("SurfacePressed")
+        TileRenderer.FillRect(hdc, left, top, right, bottom, ThemeManager.Color("Window"))
+        TileRenderer.FillRounded(hdc, left, top, right, bottom,
+            Round(7 * dpi / 96), background)
+        border := item.Selected ? accent : ThemeManager.Color("MutedBorder")
+        TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 1,
+            Round(7 * dpi / 96), focused ? accent : border,
+            focused ? Max(2, Round(2 * dpi / 96)) : 1)
+        markerSize := Round(7 * dpi / 96)
+        markerLeft := left + Floor((right - left - markerSize) / 2)
+        markerTop := top + Floor((bottom - top - markerSize) / 2)
+        TileRenderer.FillRounded(hdc, markerLeft, markerTop,
+            markerLeft + markerSize, markerTop + markerSize, markerSize,
+            disabled ? ThemeManager.Color("DisabledText")
+                : item.Selected ? accent : ThemeManager.Color("MutedText"))
+    }
+
+    static DrawHotkey(hdc, item, left, top, right, bottom, dpi,
+        focused, pressed, disabled, accent) {
+        this.DrawRowBackground(hdc, item, left, top, right, bottom, dpi,
+            focused, pressed, disabled, accent)
+        titleFont := TileRenderer.CreateFont(10, 600, dpi)
+        subtitleFont := TileRenderer.CreateFont(8, 400, dpi)
+        valueFont := TileRenderer.CreateFont(9, 600, dpi)
+        try {
+            TileRenderer.DrawText(hdc, item.Title, titleFont, ThemeManager.Color("Text"),
+                left + Round(16 * dpi / 96), top + Round(7 * dpi / 96),
+                right - Round(240 * dpi / 96), top + Round(31 * dpi / 96))
+            TileRenderer.DrawText(hdc, item.Subtitle, subtitleFont,
+                ThemeManager.Color("MutedText"), left + Round(16 * dpi / 96),
+                top + Round(30 * dpi / 96), right - Round(240 * dpi / 96),
+                bottom - Round(5 * dpi / 96), 0x00000010 | 0x00000800)
+            pillLeft := right - Round(218 * dpi / 96)
+            pillTop := top + Round(13 * dpi / 96)
+            pillBottom := bottom - Round(13 * dpi / 96)
+            TileRenderer.FillRounded(hdc, pillLeft, pillTop,
+                right - Round(14 * dpi / 96), pillBottom,
+                Round(8 * dpi / 96), ThemeManager.Color("Input"))
+            TileRenderer.StrokeRounded(hdc, pillLeft + 1, pillTop + 1,
+                right - Round(15 * dpi / 96), pillBottom - 1,
+                Round(8 * dpi / 96), focused ? accent : ThemeManager.Color("Border"),
+                focused ? Max(2, Round(2 * dpi / 96)) : 1)
+            TileRenderer.DrawText(hdc, item.Value, valueFont,
+                disabled ? ThemeManager.Color("DisabledText") : ThemeManager.Color("Text"),
+                pillLeft + Round(10 * dpi / 96), pillTop,
+                right - Round(24 * dpi / 96), pillBottom,
+                0x00000001 | 0x00000004 | 0x00000020 | 0x00000800)
+        } finally {
+            DllCall("DeleteObject", "ptr", titleFont)
+            DllCall("DeleteObject", "ptr", subtitleFont)
+            DllCall("DeleteObject", "ptr", valueFont)
+        }
+    }
+
+    static DrawAction(hdc, item, left, top, right, bottom, dpi,
+        focused, pressed, disabled, accent, primary) {
+        base := primary ? accent : ThemeManager.Color("SurfaceElevated",
+            ThemeManager.Color("Surface"))
+        hover := primary ? TileRenderer.BlendRgb(0xFFFFFF, accent, 0.14)
+            : ThemeManager.Color("SurfaceHover")
+        background := TileRenderer.BlendRgb(hover, base, item.HoverProgress)
+        if pressed
+            background := primary ? TileRenderer.BlendRgb(0x000000, accent, 0.12)
+                : ThemeManager.Color("SurfacePressed")
+        if disabled
+            background := ThemeManager.Color("DisabledSurface")
+        TileRenderer.FillRect(hdc, left, top, right, bottom, ThemeManager.Color("Window"))
+        TileRenderer.FillRounded(hdc, left, top, right, bottom,
+            Round(9 * dpi / 96), background)
+        border := focused ? accent : primary ? accent : ThemeManager.Color("MutedBorder")
+        TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 1,
+            Round(9 * dpi / 96), border, focused ? Max(2, Round(2 * dpi / 96)) : 1)
+        font := TileRenderer.CreateFont(9, 600, dpi)
+        try TileRenderer.DrawText(hdc, item.Title, font,
+            disabled ? ThemeManager.Color("DisabledText")
+                : primary ? ThemeManager.Color("Window")
+                : item.Kind = "danger" ? 0xF87171 : ThemeManager.Color("Text"),
+            left, top, right, bottom,
+            0x00000001 | 0x00000004 | 0x00000020 | 0x00000800)
+        finally DllCall("DeleteObject", "ptr", font)
+    }
+
+    static DrawRowBackground(hdc, item, left, top, right, bottom, dpi,
+        focused, pressed, disabled, accent) {
+        base := ThemeManager.Color("SurfaceElevated", ThemeManager.Color("Surface"))
+        background := TileRenderer.BlendRgb(ThemeManager.Color("SurfaceHover"), base,
+            item.HoverProgress)
+        if pressed
+            background := ThemeManager.Color("SurfacePressed")
+        if disabled
+            background := ThemeManager.Color("DisabledSurface")
+        TileRenderer.FillRect(hdc, left, top, right, bottom, ThemeManager.Color("Window"))
+        TileRenderer.FillRounded(hdc, left, top, right, bottom,
+            Round(11 * dpi / 96), background)
+        border := focused ? accent : ThemeManager.Color("MutedBorder")
+        TileRenderer.StrokeRounded(hdc, left + 1, top + 1, right - 1, bottom - 1,
+            Round(11 * dpi / 96), border, focused ? Max(2, Round(2 * dpi / 96)) : 1)
     }
 
     static OnMouseMove(hwnd) {
@@ -233,9 +450,12 @@ class SettingsRenderer {
         if this.HoveredHwnd != hwnd {
             old := this.HoveredHwnd
             this.HoveredHwnd := hwnd
-            if old
-                DllCall("InvalidateRect", "ptr", old, "ptr", 0, "int", true)
-            DllCall("InvalidateRect", "ptr", hwnd, "ptr", 0, "int", true)
+            if old && this.Items.Has(old) {
+                this.Items[old].HoverTarget := 0.0
+                this.StartAnimation(this.Items[old], old)
+            }
+            this.Items[hwnd].HoverTarget := 1.0
+            this.StartAnimation(this.Items[hwnd], hwnd)
         }
         tracking := Buffer(A_PtrSize = 8 ? 24 : 16, 0)
         NumPut("uint", tracking.Size, tracking, 0)
@@ -247,22 +467,26 @@ class SettingsRenderer {
     static OnMouseLeave(hwnd) {
         if hwnd = this.HoveredHwnd {
             this.HoveredHwnd := 0
-            DllCall("InvalidateRect", "ptr", hwnd, "ptr", 0, "int", true)
+            if this.Items.Has(hwnd) {
+                this.Items[hwnd].HoverTarget := 0.0
+                this.StartAnimation(this.Items[hwnd], hwnd)
+            }
         }
     }
 }
 
 class SettingsDialog {
-    static LogicalWidth := 620
-    static LogicalHeight := 460
+    static LogicalWidth := 780
+    static LogicalHeight := 620
 
     __New(parentGui, settings, applyCallback, closedCallback := 0,
-        testMode := false, connectionManager := 0) {
+        testMode := false, connectionManager := 0, calendarManager := 0) {
         this.ParentGui := parentGui
         this.Settings := settings
         this.ApplyCallback := applyCallback
         this.ClosedCallback := closedCallback
         this.ConnectionManager := connectionManager
+        this.CalendarManager := calendarManager
         this.Closed := false
         this.TestMode := testMode
         this.Loading := true
@@ -271,14 +495,23 @@ class SettingsDialog {
         this.CurrentSection := "general"
         this.AccessibleNames := Map()
         this.TextControls := []
+        this.MutedTextControls := []
+        this.SurfaceControls := []
         this.InputControls := []
         this.DrawnControls := []
         this.ActionCallbacks := Map()
-        this.Pages := Map("general", [], "clipboard", [], "account", [], "advanced", [])
+        this.Pages := Map("general", [], "behavior", [], "clipboard", [],
+            "appearance", [], "account", [], "advanced", [])
+        this.PageLayouts := Map()
         this.Tabs := Map()
         this.ToggleValues := Map()
         this.ToggleControls := Map()
+        this.SegmentControls := Map()
+        this.PlacementControls := []
+        this.OpeningPositionValue := "middle-right"
         this.AutoSaveTimer := ObjBindMethod(this, "AutoSave")
+        this.PageAnimationTimer := ObjBindMethod(this, "AnimatePageFrame")
+        this.StatusHideTimer := ObjBindMethod(this, "HideSavedStatus")
         this.Gui := Gui("", "Olio Launcher Settings")
         this.Gui.MarginX := 0
         this.Gui.MarginY := 0
@@ -290,228 +523,274 @@ class SettingsDialog {
         this.CreateControls()
         this.LoadValues(settings)
         this.ApplyTheme()
-        this.ShowSection("general")
+        this.ShowSection(this.InitialSection())
         this.Show()
         this.Loading := false
     }
 
     CreateControls() {
-        this.Gui.SetFont("s18 bold", "Segoe UI Variable Display")
-        this.Heading := this.AddText("x24 y18 w260 h34", "Settings")
-        this.Gui.SetFont("s9 norm", "Segoe UI Variable Text")
-        this.Intro := this.AddText("x24 y50 w310 h22", "Changes save automatically.")
+        this.SidebarSurface := this.Gui.AddText("x175 y0 w1 h620")
+        this.SurfaceControls.Push({Control: this.SidebarSurface, Color: "MutedBorder"})
+        this.Brand := this.Gui.Add("Custom",
+            "ClassButton x20 y18 w136 h48 0x5400000B", "Olio Launcher settings")
+        this.DrawnControls.Push(this.Brand)
+        SettingsRenderer.Register(this.Brand, "brand", "Olio")
+        this.BrandSubtitle := this.Brand
 
-        for item in [
-            {Key: "general", Text: "General", X: 24, W: 96},
-            {Key: "clipboard", Text: "Clipboard & paste", X: 128, W: 152},
-            {Key: "account", Text: "Account", X: 288, W: 94}
-        ] {
-            tab := this.AddDrawnButton("x" item.X " y76 w" item.W " h34",
-                "tab", item.Text, "", 0x38BDF8, item.Text " settings")
-            this.BindAction(tab, ObjBindMethod(this, "ShowSection", item.Key))
-            this.Tabs[item.Key] := tab
+        navItems := [
+            {Key: "general", Text: "General", Glyph: Chr(0xE713)},
+            {Key: "behavior", Text: "Behavior", Glyph: Chr(0xE8A7)},
+            {Key: "clipboard", Text: "Clipboard", Glyph: Chr(0xE8C8)},
+            {Key: "appearance", Text: "Appearance", Glyph: Chr(0xE771)},
+            {Key: "account", Text: "Account", Glyph: Chr(0xE77B)},
+            {Key: "advanced", Text: "Advanced", Glyph: Chr(0xE712)}
+        ]
+        y := 84
+        for item in navItems {
+            button := this.AddDrawnButton("x16 y" y " w144 h44", "nav",
+                item.Text, "", ThemeManager.Color("Accent", 0x38BDF8),
+                item.Text " settings", item.Glyph)
+            this.BindAction(button, ObjBindMethod(this, "ShowSection", item.Key))
+            this.Tabs[item.Key] := button
+            y += 48
         }
-        this.MoreButton := this.AddDrawnButton("x564 y22 w32 h32",
-            "more", "More", "", 0x818CF8, "More settings options")
-        this.BindAction(this.MoreButton, (*) => this.ShowMoreMenu())
-        this.Tooltips.Add(this.MoreButton, "More options")
+        this.SidebarHint := this.Gui.Add("Custom",
+            "ClassButton x20 y558 w136 h42 0x5400000B",
+            "Every change saves automatically.")
+        this.DrawnControls.Push(this.SidebarHint)
+        SettingsRenderer.Register(this.SidebarHint, "sidebarHint",
+            "Every change saves automatically.")
+
+        this.Gui.SetFont("s9 norm", "Segoe UI Variable Text")
+        this.Status := this.AddText("x626 y34 w122 h22 +Right", "")
+        this.InlineStatus := this.AddText("x208 y576 w540 h24 +Wrap Hidden", "")
 
         this.CreateGeneralPage()
+        this.CreateBehaviorPage()
         this.CreateClipboardPage()
+        this.CreateAppearancePage()
         this.CreateAccountPage()
         this.CreateAdvancedPage()
-
-        this.Status := this.AddText("x24 y410 w420 h30 +Wrap", "")
-        this.CloseButton := this.AddDrawnButton("x500 y406 w96 h34",
-            "action", "Close", "", 0x38BDF8, "Close Settings")
-        this.BindAction(this.CloseButton, (*) => this.Close())
     }
 
     CreateGeneralPage() {
         page := "general"
-        this.PageHeading(page, "General", "The essentials.")
-        this.FocusKeyLabel := this.PageText(page, "x24 y166 w220 h20", "Focus Key")
-        focusHelp := "Keyboard shortcut that opens or hides the launcher. Press it twice "
-            . "quickly to start Dynamic Screenshot."
-        this.FocusKeyEdit := this.PageControl(page,
-            this.Gui.AddEdit("x24 y190 w242 h32", ""))
-        this.Name(this.FocusKeyEdit, "Focus Key")
-        this.Tooltips.Add(this.FocusKeyLabel, focusHelp)
-        this.Tooltips.Add(this.FocusKeyEdit, focusHelp)
-        this.TestFocusKeyButton := this.PageControl(page,
-            this.AddDrawnButton("x278 y190 w150 h32", "action",
-                "Check shortcut", "", 0x818CF8, "Check Focus Key availability"))
-        this.BindAction(this.TestFocusKeyButton, (*) => this.TestFocusKey())
-        this.ThemeLabel := this.PageText(page, "x448 y166 w148 h20", "Appearance")
-        themeHelp := "Follow Windows uses your app light or dark preference. High "
-            . "contrast always uses Windows system colors."
-        this.ThemeList := this.PageControl(page,
-            this.Gui.AddDropDownList("x448 y190 w148",
-                ["Follow Windows", "Dark", "Light"]))
-        this.Name(this.ThemeList, "Launcher appearance")
-        this.Tooltips.Add(this.ThemeLabel, themeHelp)
-        this.Tooltips.Add(this.ThemeList, themeHelp)
-
+        this.PageHeading(page, "General", "The essentials for starting and opening Olio.")
+        this.FocusKeyRecorder := this.PageControl(page,
+            this.AddDrawnButton("x208 y112 w540 h82", "hotkey", "Focus shortcut",
+                "Select this row, then press the keys you want to use.",
+                ThemeManager.Color("Accent", 0x38BDF8), "Record Focus Key shortcut"))
+        this.BindAction(this.FocusKeyRecorder, (*) => this.RecordFocusKey())
+        this.Tooltips.Add(this.FocusKeyRecorder,
+            "Opens or hides the launcher. Press the shortcut twice quickly to start Dynamic Screenshot.")
+        this.FocusKeyError := this.PageText(page, "x224 y198 w508 h22", "")
         this.StartWithWindowsCheck := this.CreateToggle(page,
-            "x24 y238 w572 h62", "startWithWindows",
-            "Open when I sign in",
-            "Starts for your Windows user. Never requires administrator access.",
+            "x208 y230 w540 h72", "startWithWindows", "Open when I sign in",
+            "Starts for your Windows account without administrator access.",
             "Starts Olio Launcher after you sign in using a per-user Windows startup entry.")
-        this.ReducedMotionCheck := this.CreateToggle(page,
-            "x24 y310 w572 h62", "reducedMotion",
-            "Reduce motion",
-            "Minimizes nonessential hover effects without disabling features.",
-            "Reduces nonessential visual motion while keeping every feature available.")
 
-        this.RegisterAutoSave(this.FocusKeyEdit)
-        this.RegisterAutoSave(this.ThemeList, true)
+        this.FocusKeyEdit := this.Gui.AddEdit("x-10000 y-10000 w1 h1 Hidden", "")
+        this.InputControls.Push(this.FocusKeyEdit)
+        this.Name(this.FocusKeyEdit, "Focus Key value")
+        this.TestFocusKeyButton := this.FocusKeyRecorder
+    }
+
+    CreateBehaviorPage() {
+        page := "behavior"
+        this.PageHeading(page, "Launcher behavior",
+            "Choose where Olio appears and what happens after an action.")
+
+        this.PageLabel(page, "x208 y106 w180 h20", "Open on")
+        this.MonitorList := this.HiddenList(["Active monitor", "Primary monitor",
+            "Remembered monitor"], "Opening monitor")
+        this.CreateSegmentGroup(page, "openingMonitor", 208, 130, 540,
+            ["Active monitor", "Primary monitor", "Remembered"],
+            ["active", "primary", "remembered"], this.MonitorList)
+
+        this.PageLabel(page, "x208 y180 w220 h20", "Opening position")
+        positionHelp := this.PageText(page, "x208 y208 w274 h56 +Wrap",
+            "Olio is designed to sit against the right edge without covering the center of your work.")
+        this.MutedTextControls.Push(positionHelp)
+        this.CreatePlacementPicker(page, 538, 202)
+        this.PositionList := this.HiddenList([
+            "Upper right", "Middle right"], "Opening position")
+
+        this.PageLabel(page, "x208 y294 w180 h20", "Launcher scale")
+        this.ScaleList := this.PageControl(page, this.Gui.AddDropDownList(
+            "x208 y318 w540 Choose2", ["Compact - 90%", "Standard - 100%", "Large - 115%"]))
+        this.Name(this.ScaleList, "Launcher scale")
+        this.InputControls.Push(this.ScaleList)
+        this.RegisterAutoSave(this.ScaleList, true)
+        this.Tooltips.Add(this.ScaleList,
+            "Changes the overall launcher size while preserving its proportions.")
+
+        this.AlwaysOnTopCheck := this.CreateToggle(page,
+            "x208 y370 w264 h64", "alwaysOnTop", "Always on top",
+            "Keep Olio above other apps.",
+            "Keeps the launcher visible above ordinary windows while it is open.")
+        this.CloseOnFocusLostCheck := this.CreateToggle(page,
+            "x484 y370 w264 h64", "closeOnFocusLost", "Hide on click away",
+            "Close when focus moves away.",
+            "The separate Settings window stays open.")
+        this.HideOnClickAwayCheck := this.CloseOnFocusLostCheck
+        this.CloseAfterSelectionCheck := this.CreateToggle(page,
+            "x208 y446 w264 h64", "closeAfterSelection", "Hide after choosing",
+            "Close after a successful copy.",
+            "Applies to successful mouse and keyboard selections.")
+        this.AutoPasteCheck := this.CreateToggle(page,
+            "x484 y446 w264 h64", "autoPasteAfterSelection", "Paste automatically",
+            "Paste into the previous app.",
+            "Pastes only into the previously active app. If Windows blocks the target, the item remains copied for manual paste.")
     }
 
     CreateClipboardPage() {
         page := "clipboard"
-        this.PageHeading(page, "Clipboard and paste", "Capture and selection behavior.")
-        this.CloseOnFocusLostCheck := this.CreateToggle(page,
-            "x24 y166 w276 h82", "closeOnFocusLost",
-            "Hide when I click away",
-            "Closes the launcher when another window becomes active.",
-            "Hides the launcher when you click another window. The separate Settings "
-            "window stays open.")
-        this.HideOnClickAwayCheck := this.CloseOnFocusLostCheck
-        this.CloseAfterSelectionCheck := this.CreateToggle(page,
-            "x320 y166 w276 h82", "closeAfterSelection",
-            "Hide after choosing",
-            "Closes after a successful copy.",
-            "Hides after a Clipboard History or Quick Paste item is copied successfully.")
-        this.AutoPasteCheck := this.CreateToggle(page,
-            "x24 y258 w276 h82", "autoPasteAfterSelection",
-            "Paste automatically",
-            "Only into the app active before the launcher.",
-            "Copies the item, hides the launcher, and attempts to paste only into the "
-            "previously active app. It never elevates.")
+        this.PageHeading(page, "Clipboard",
+            "Control capture without changing the items already in memory.")
         this.ClipboardPausedCheck := this.CreateToggle(page,
-            "x320 y258 w276 h82", "clipboardPaused",
-            "Pause history",
-            "Stops new capture; existing items still work.",
-            "Stops new Clipboard History capture. Existing Clipboard History and Quick "
-            "Paste items still work.")
-        this.ClipboardNote := this.PageText(page, "x24 y354 w572 h38 +Wrap",
-            "Automatic paste always fails safely: if Windows blocks the target, the item "
-            "stays copied for manual paste.")
+            "x208 y112 w540 h72", "clipboardPaused", "Pause Clipboard History",
+            "Stop new capture. Existing Clipboard History and Quick Paste items still work.",
+            "Pausing never removes existing items and does not block deliberate copy or paste.")
+
+        this.PageLabel(page, "x208 y210 w320 h22", "Apps ignored by Clipboard History")
+        this.ClipboardAppsHelp := this.PageText(page, "x208 y234 w540 h36 +Wrap",
+            "Olio stores only executable names. Content copied while one of these apps is active is ignored.")
+        this.MutedTextControls.Push(this.ClipboardAppsHelp)
+        this.SensitiveList := this.PageControl(page,
+            this.Gui.AddListBox("x208 y282 w388 h218", []))
+        this.Name(this.SensitiveList, "Apps ignored by Clipboard History")
+        this.InputControls.Push(this.SensitiveList)
+        this.Tooltips.Add(this.SensitiveList,
+            "Content copied while a listed executable is active is not added to Clipboard History.")
+        this.AddSensitiveButton := this.PageControl(page,
+            this.AddDrawnButton("x608 y282 w140 h36", "action", "Add app", "",
+                ThemeManager.Color("Accent", 0x38BDF8), "Add an ignored application"))
+        SettingsRenderer.SetSelected(this.AddSensitiveButton, true)
+        this.RemoveSensitiveButton := this.PageControl(page,
+            this.AddDrawnButton("x608 y326 w140 h36", "action", "Remove", "",
+                ThemeManager.Color("Accent", 0x38BDF8), "Remove selected ignored application"))
+        this.BindAction(this.AddSensitiveButton, (*) => this.ChooseSensitiveExecutable())
+        this.BindAction(this.RemoveSensitiveButton, (*) => this.RemoveSensitiveExecutable())
+        this.Tooltips.Add(this.AddSensitiveButton,
+            "Choose a Windows .exe file. Only its file name is stored.")
+        this.Tooltips.Add(this.RemoveSensitiveButton,
+            "Remove the selected executable from the ignored-app list.")
+        this.SensitiveEdit := this.Gui.AddEdit("x-10000 y-10000 w1 h1 Hidden", "")
+        this.InputControls.Push(this.SensitiveEdit)
+    }
+
+    CreateAppearancePage() {
+        page := "appearance"
+        this.PageHeading(page, "Appearance",
+            "Match Windows or choose the Olio look you prefer.")
+        this.PageLabel(page, "x208 y112 w180 h20", "Color mode")
+        this.ThemeList := this.HiddenList(["Follow Windows", "Dark", "Light"],
+            "Launcher appearance")
+        this.CreateSegmentGroup(page, "theme", 208, 138, 540,
+            ["Follow Windows", "Dark", "Light"], ["system", "dark", "light"],
+            this.ThemeList)
+        this.AppearanceHelp := this.PageText(page, "x208 y188 w540 h34 +Wrap",
+            "High contrast always follows Windows system colors. Motion is minimized throughout the launcher.")
+        this.MutedTextControls.Push(this.AppearanceHelp)
     }
 
     CreateAccountPage() {
         page := "account"
-        this.PageHeading(page, "Olio account", "Protected device connection.")
-        this.DeviceNameLabel := this.PageText(page, "x24 y166 w220 h20", "Device name")
-        deviceHelp := "Name shown for this launcher in Olio Workstation. It does not "
-            . "contain your account name or email."
+        this.PageHeading(page, "Account", "Connect this Windows device to Olio Workstation.")
+        this.PageLabel(page, "x208 y112 w220 h20", "Device name")
         this.DeviceNameEdit := this.PageControl(page,
-            this.Gui.AddEdit("x24 y190 w300 h32", ""))
+            this.Gui.AddEdit("x208 y138 w540 h34", ""))
         this.Name(this.DeviceNameEdit, "Olio Launcher device name")
-        this.Tooltips.Add(this.DeviceNameLabel, deviceHelp)
-        this.Tooltips.Add(this.DeviceNameEdit, deviceHelp)
+        this.InputControls.Push(this.DeviceNameEdit)
+        this.Tooltips.Add(this.DeviceNameEdit,
+            "Name shown for this launcher in Olio Workstation. It contains no account name or email.")
         this.RegisterAutoSave(this.DeviceNameEdit)
+
+        this.ConnectionSurface := this.PageText(page, "x208 y202 w540 h196", "")
+        this.SurfaceControls.Push({Control: this.ConnectionSurface, Color: "SurfaceElevated"})
+        this.ConnectionEyebrow := this.PageText(page, "x232 y224 w492 h20", "CONNECTION STATUS")
+        this.MutedTextControls.Push(this.ConnectionEyebrow)
         this.ConnectionStatus := this.PageText(page,
-            "x24 y238 w572 h56 +Wrap", "Connect without entering your Olio password.")
-        connectionHelp := "Connection uses one-time browser approval. The protected "
-            . "device credential stays in Windows Credential Manager, not settings."
+            "x232 y254 w492 h62 +Wrap", "Connect without entering your Olio password.")
+        connectionHelp := "Connection uses one-time browser approval. The protected device credential stays in Windows Credential Manager, not settings."
         this.Tooltips.Add(this.ConnectionStatus, connectionHelp)
+        this.AccountNote := this.PageText(page, "x232 y412 w492 h44 +Wrap",
+            "Resetting launcher settings never disconnects this device.")
+        this.MutedTextControls.Push(this.AccountNote)
+
+        this.CalendarEyebrow := this.PageText(page, "x232 y468 w190 h20", "TODAY'S SCHEDULE")
+        this.MutedTextControls.Push(this.CalendarEyebrow)
+        this.CalendarStatus := this.PageText(page, "x232 y494 w320 h44 +Wrap",
+            "Calendar has not been refreshed yet.")
+        this.MutedTextControls.Push(this.CalendarStatus)
+        this.CalendarRefreshButton := this.PageControl(page,
+            this.AddDrawnButton("x570 y486 w154 h40", "action", "Refresh schedule", "",
+                0xF59E0B, "Refresh today's Google Calendar schedule"))
+        this.BindAction(this.CalendarRefreshButton, (*) => this.RefreshCalendarNow())
+
         this.ConnectButton := this.PageControl(page,
-            this.AddDrawnButton("x24 y306 w572 h38", "action",
-                "Connect Olio account", "", 0x38BDF8, "Connect an Olio account"))
+            this.AddDrawnButton("x232 y334 w492 h40", "action", "Connect Olio account", "",
+                ThemeManager.Color("Accent", 0x38BDF8), "Connect an Olio account"))
+        SettingsRenderer.SetSelected(this.ConnectButton, true)
         this.CancelConnectionButton := this.PageControl(page,
-            this.AddDrawnButton("x24 y306 w572 h38", "action",
-                "Cancel connection", "", 0xF59E0B, "Cancel Olio account connection"))
+            this.AddDrawnButton("x232 y334 w492 h40", "action", "Cancel connection", "",
+                0xF59E0B, "Cancel Olio account connection"))
         this.RetryConnectionButton := this.PageControl(page,
-            this.AddDrawnButton("x24 y306 w276 h38", "action",
-                "Retry", "", 0x38BDF8, "Retry Olio account connection"))
+            this.AddDrawnButton("x232 y334 w238 h40", "action", "Retry", "",
+                ThemeManager.Color("Accent", 0x38BDF8), "Retry Olio account connection"))
+        SettingsRenderer.SetSelected(this.RetryConnectionButton, true)
         this.DisconnectButton := this.PageControl(page,
-            this.AddDrawnButton("x320 y306 w276 h38", "action",
-                "Disconnect account", "", 0xF87171, "Disconnect Olio account"))
+            this.AddDrawnButton("x486 y334 w238 h40", "danger", "Disconnect account", "",
+                0xF87171, "Disconnect Olio account"))
         this.BindAction(this.ConnectButton, (*) => this.StartConnection())
         this.BindAction(this.CancelConnectionButton,
             (*) => this.ConnectionManager.CancelPairing())
-        this.BindAction(this.RetryConnectionButton,
-            (*) => this.ConnectionManager.Retry())
+        this.BindAction(this.RetryConnectionButton, (*) => this.ConnectionManager.Retry())
         this.BindAction(this.DisconnectButton, (*) => this.ConfirmDisconnect())
-        this.AccountNote := this.PageText(page, "x24 y358 w572 h36 +Wrap",
-            "Disconnect is confirmed separately. Resetting settings never disconnects "
-            "your account.")
     }
 
     CreateAdvancedPage() {
         page := "advanced"
-        this.PageHeading(page, "Advanced", "Less common controls.")
-        monitorHelp := "Active follows the app you were using. Primary uses the Windows "
-            . "primary display. Remembered returns to the last display used."
-        this.MonitorLabel := this.PageText(page, "x24 y166 w180 h20", "Open on")
-        this.MonitorList := this.PageControl(page,
-            this.Gui.AddDropDownList("x24 y190 w180",
-                ["Active monitor", "Primary monitor", "Remembered monitor"]))
-        this.Name(this.MonitorList, "Opening monitor")
-        this.Tooltips.Add(this.MonitorLabel, monitorHelp)
-        this.Tooltips.Add(this.MonitorList, monitorHelp)
-        positionHelp := "Right edge uses the display work area. Remembered returns to "
-            . "the last position where you moved the launcher."
-        this.PositionLabel := this.PageText(page, "x220 y166 w180 h20", "Place it at")
-        this.PositionList := this.PageControl(page,
-            this.Gui.AddDropDownList("x220 y190 w180",
-                ["Right edge", "Remembered position"]))
-        this.Name(this.PositionList, "Opening position")
-        this.Tooltips.Add(this.PositionLabel, positionHelp)
-        this.Tooltips.Add(this.PositionList, positionHelp)
-        this.PanelWidthLabel := this.PageText(page,
-            "x416 y166 w180 h20", "Panel width")
-        this.PanelWidthEdit := this.PageControl(page,
-            this.Gui.AddEdit("x416 y190 w180 h32 Number", ""))
-        this.Name(this.PanelWidthEdit, "Panel width from 280 through 640")
-        this.Tooltips.Add(this.PanelWidthLabel,
-            "Launcher width in logical pixels, from 280 through 640.")
-        this.Tooltips.Add(this.PanelWidthEdit,
-            "Launcher width in logical pixels, from 280 through 640.")
-
-        this.AlwaysOnTopCheck := this.CreateToggle(page,
-            "x24 y238 w276 h66", "alwaysOnTop",
-            "Always on top", "Keeps the launcher above ordinary windows.",
-            "Keeps the launcher visible above ordinary windows while it is open.")
+        this.PageHeading(page, "Advanced",
+            "Diagnostics, privacy exclusions, and recovery controls.")
         this.DiagnosticsCheck := this.CreateToggle(page,
-            "x320 y238 w276 h66", "loggingEnabled",
-            "Redacted diagnostics", "Saves only allowlisted status tokens.",
-            "Never logs credentials, identities, clipboard or Quick Paste content, "
-            "screenshots, emails, headers, or request bodies.")
-
-        this.SensitiveLabel := this.PageText(page,
-            "x24 y318 w320 h20", "Apps ignored by Clipboard History")
-        exclusionsHelp := "Content copied while a listed executable is active is not "
-            . "added to Clipboard History. Separate file names with semicolons."
-        this.SensitiveEdit := this.PageControl(page,
-            this.Gui.AddEdit("x24 y342 w420 h32", ""))
-        this.Name(this.SensitiveEdit, "Apps ignored by Clipboard History")
-        this.Tooltips.Add(this.SensitiveLabel, exclusionsHelp)
-        this.Tooltips.Add(this.SensitiveEdit, exclusionsHelp)
+            "x208 y112 w540 h72", "loggingEnabled", "Troubleshooting log",
+            "Save local, redacted technical events. Nothing is uploaded.",
+            "Never logs credentials, identities, clipboard or Quick Paste content, screenshots, emails, headers, or request bodies.")
+        this.OpenDiagnosticsButton := this.PageControl(page,
+            this.AddDrawnButton("x208 y198 w188 h38", "action", "Open log folder", "",
+                ThemeManager.Color("Accent", 0x38BDF8), "Open troubleshooting log folder"))
+        this.BindAction(this.OpenDiagnosticsButton, (*) => this.OpenDiagnosticsFolder())
+        this.PageLabel(page, "x208 y274 w320 h22", "Reset launcher")
+        this.ResetHelp := this.PageText(page, "x208 y302 w540 h52 +Wrap",
+            "Restore safe defaults for launcher behavior and appearance. Your Olio account connection and protected credential are preserved.")
+        this.MutedTextControls.Push(this.ResetHelp)
         this.ResetButton := this.PageControl(page,
-            this.AddDrawnButton("x456 y342 w140 h32", "action",
-                "Reset settings", "", 0xF87171, "Reset launcher settings"))
+            this.AddDrawnButton("x208 y374 w188 h40", "danger", "Reset settings", "",
+                0xF87171, "Reset launcher settings"))
         this.BindAction(this.ResetButton, (*) => this.ConfirmReset())
-        this.Tooltips.Add(this.ResetButton, "Restores safe defaults while preserving "
-            "the Olio account connection and protected credential.")
-
-        this.RegisterAutoSave(this.MonitorList, true)
-        this.RegisterAutoSave(this.PositionList, true)
-        this.RegisterAutoSave(this.PanelWidthEdit)
-        this.RegisterAutoSave(this.SensitiveEdit)
+        this.Tooltips.Add(this.ResetButton,
+            "Restores safe defaults while preserving the Olio account connection and protected credential.")
     }
 
     PageHeading(page, title, subtitle) {
-        this.Gui.SetFont("s14 bold", "Segoe UI Variable Display")
-        this.PageText(page, "x24 y118 w572 h28", title)
+        this.Gui.SetFont("s20 bold", "Segoe UI Variable Display")
+        this.PageText(page, "x208 y28 w400 h38", title)
         this.Gui.SetFont("s9 norm", "Segoe UI Variable Text")
-        this.PageText(page, "x24 y144 w572 h20", subtitle)
+        description := this.PageText(page, "x208 y68 w510 h24", subtitle)
+        this.MutedTextControls.Push(description)
+    }
+
+    PageLabel(page, options, text) {
+        this.Gui.SetFont("s9 bold", "Segoe UI Variable Text")
+        label := this.PageText(page, options, text)
+        this.Gui.SetFont("s9 norm", "Segoe UI Variable Text")
+        return label
     }
 
     CreateToggle(page, options, key, title, subtitle, tooltip) {
         control := this.AddDrawnButton(options, "toggle", title, subtitle,
-            0x38BDF8, title)
+            ThemeManager.Color("Accent", 0x38BDF8), title)
         this.PageControl(page, control)
         this.ToggleControls[key] := control
         this.BindAction(control, ObjBindMethod(this, "ToggleSetting", key, control))
@@ -519,12 +798,69 @@ class SettingsDialog {
         return control
     }
 
-    AddDrawnButton(options, kind, title, subtitle, accent, accessibleName) {
+    CreateSegmentGroup(page, key, x, y, width, labels, values, hiddenControl) {
+        gap := 8
+        itemWidth := Floor((width - gap * (labels.Length - 1)) / labels.Length)
+        controls := []
+        Loop labels.Length {
+            itemX := x + (A_Index - 1) * (itemWidth + gap)
+            if A_Index = labels.Length
+                itemWidth := x + width - itemX
+            control := this.PageControl(page,
+                this.AddDrawnButton("x" itemX " y" y " w" itemWidth " h38",
+                    "segment", labels[A_Index], "",
+                    ThemeManager.Color("Accent", 0x38BDF8), labels[A_Index]))
+            value := values[A_Index]
+            this.BindAction(control, ObjBindMethod(this, "SelectSegment", key,
+                value, hiddenControl))
+            help := key = "openingMonitor"
+                ? "Choose which display the launcher opens on."
+                : key = "openingPosition"
+                    ? "Choose the edge or remembered position used when Olio opens."
+                    : "Choose whether Olio follows Windows, stays dark, or stays light."
+            this.Tooltips.Add(control, help)
+            controls.Push({Control: control, Value: value})
+        }
+        this.SegmentControls[key] := controls
+        return controls
+    }
+
+    CreatePlacementPicker(page, x, y) {
+        positions := [
+            ["top-right", "Upper right"], ["middle-right", "Middle right"]
+        ]
+        buttonWidth := 102, buttonHeight := 34, gap := 8
+        Loop positions.Length {
+            position := positions[A_Index]
+            control := this.PageControl(page,
+                this.AddDrawnButton("x" x
+                    " y" (y + (A_Index - 1) * (buttonHeight + gap)) " w" buttonWidth
+                    " h" buttonHeight, "placement", position[2], "",
+                    ThemeManager.Color("Accent", 0x38BDF8),
+                    "Open launcher at " position[2]))
+            value := position[1]
+            this.BindAction(control, ObjBindMethod(this, "SelectPlacement", value))
+            this.Tooltips.Add(control, "Open the launcher at the " StrLower(position[2])
+                " of the selected monitor.")
+            this.PlacementControls.Push({Control: control, Value: value})
+        }
+    }
+
+    HiddenList(items, accessibleName) {
+        control := this.Gui.AddDropDownList("x-10000 y-10000 w1 Hidden", items)
+        this.InputControls.Push(control)
+        this.Name(control, accessibleName)
+        return control
+    }
+
+    AddDrawnButton(options, kind, title, subtitle, accent, accessibleName,
+        glyph := "") {
         button := this.Gui.Add("Custom",
             "ClassButton " options " 0x5001000B", accessibleName)
         this.DrawnControls.Push(button)
         this.Name(button, accessibleName)
-        SettingsRenderer.Register(button, kind, title, subtitle, accent)
+        SettingsRenderer.Register(button, kind, title, subtitle, accent,
+            false, false, true, glyph)
         return button
     }
 
@@ -546,15 +882,18 @@ class SettingsDialog {
 
     PageText(page, options, text) {
         control := this.AddText(options " Hidden", text)
-        this.Pages[page].Push(control)
-        return control
+        return this.PageControl(page, control)
     }
 
     PageControl(page, control) {
         control.Visible := false
         this.Pages[page].Push(control)
-        if control.Type = "Edit" || control.Type = "DropDownList"
-            this.InputControls.Push(control)
+        try {
+            control.GetPos(&x, &y, &width, &height)
+            this.PageLayouts[control.Hwnd] := {
+                Control: control, X: x, Y: y, Width: width, Height: height
+            }
+        }
         return control
     }
 
@@ -578,15 +917,190 @@ class SettingsDialog {
         this.QueueAutoSave(true)
     }
 
+    SelectSegment(key, value, hiddenControl, *) {
+        this.SetSegmentValue(key, value)
+        values := key = "openingMonitor" ? ["active", "primary", "remembered"]
+            : key = "openingPosition" ? ["right", "remembered"]
+            : ["system", "dark", "light"]
+        for index, candidate in values {
+            if candidate = value {
+                hiddenControl.Choose(index)
+                break
+            }
+        }
+        this.QueueAutoSave(true)
+    }
+
+    SetSegmentValue(key, value) {
+        if !this.SegmentControls.Has(key)
+            return
+        for item in this.SegmentControls[key]
+            SettingsRenderer.SetSelected(item.Control, item.Value = value)
+    }
+
+    SelectPlacement(value, *) {
+        this.SetPlacementValue(value)
+        this.QueueAutoSave(true)
+    }
+
+    SetPlacementValue(value) {
+        if value != "top-right" && value != "middle-right"
+            value := "middle-right"
+        this.OpeningPositionValue := value
+        for item in this.PlacementControls
+            SettingsRenderer.SetSelected(item.Control, item.Value = value)
+        values := ["top-right", "middle-right"]
+        for index, candidate in values {
+            if candidate = value {
+                this.PositionList.Choose(index)
+                break
+            }
+        }
+    }
+
+    RecordFocusKey(*) {
+        previous := this.FocusKeyEdit.Value
+        SettingsRenderer.SetValue(this.FocusKeyRecorder, "Press shortcut...")
+        this.FocusKeyError.Text := "Press Escape to cancel."
+        this.FocusKeyError.SetFont("c" ThemeManager.Hex("MutedText"),
+            "Segoe UI Variable Text")
+        input := InputHook("T8")
+        input.KeyOpt("{All}", "ES")
+        input.KeyOpt("{LControl}{RControl}{LShift}{RShift}{LAlt}{RAlt}{LWin}{RWin}",
+            "-E")
+        input.Start()
+        input.Wait()
+        key := input.EndKey
+        if !key || key = "Escape" {
+            SettingsRenderer.SetValue(this.FocusKeyRecorder, this.FormatHotkey(previous))
+            this.FocusKeyError.Text := key = "Escape" ? "Shortcut change canceled."
+                : "No shortcut was detected. Try again."
+            return false
+        }
+        prefix := ""
+        if GetKeyState("LWin", "P") || GetKeyState("RWin", "P")
+            prefix .= "#"
+        if GetKeyState("LControl", "P") || GetKeyState("RControl", "P")
+            prefix .= "^"
+        if GetKeyState("LAlt", "P") || GetKeyState("RAlt", "P")
+            prefix .= "!"
+        if GetKeyState("LShift", "P") || GetKeyState("RShift", "P")
+            prefix .= "+"
+        candidate := prefix key
+        validation := HotkeyManager.Validate(candidate)
+        if !validation.Ok {
+            SettingsRenderer.SetValue(this.FocusKeyRecorder, this.FormatHotkey(previous))
+            this.FocusKeyError.SetFont("c" ThemeManager.Hex("ErrorText"),
+                "Segoe UI Variable Text")
+            this.FocusKeyError.Text := "That shortcut is reserved or unavailable."
+            return false
+        }
+        this.FocusKeyEdit.Value := candidate
+        SettingsRenderer.SetValue(this.FocusKeyRecorder, this.FormatHotkey(candidate))
+        this.FocusKeyError.Text := ""
+        return this.QueueAutoSave(true)
+    }
+
+    FormatHotkey(hotkey) {
+        remainder := hotkey
+        parts := []
+        for pair in [["#", "Windows"], ["^", "Ctrl"], ["!", "Alt"], ["+", "Shift"]] {
+            if InStr(remainder, pair[1]) {
+                parts.Push(pair[2])
+                remainder := StrReplace(remainder, pair[1], "")
+            }
+        }
+        keyName := GetKeyName(remainder)
+        parts.Push(keyName ? keyName : remainder)
+        result := ""
+        for part in parts
+            result .= (result ? " + " : "") part
+        return result
+    }
+
+    ChooseSensitiveExecutable(*) {
+        selected := FileSelect(3, , "Choose an app to ignore", "Programs (*.exe)")
+        if !selected
+            return false
+        SplitPath(selected, &fileName)
+        return this.AddSensitiveExecutableName(fileName)
+    }
+
+    AddSensitiveExecutableName(fileName) {
+        current := this.SensitiveEdit.Value
+        candidateText := current ? current ";" fileName : fileName
+        normalized := SettingsManager.NormalizeSensitiveApplications(candidateText)
+        if !normalized.Ok {
+            this.SetStatus("Choose a Windows application ending in .exe.", true)
+            return false
+        }
+        if normalized.Value = current {
+            this.SetStatus("That app is already ignored.", true)
+            return false
+        }
+        this.SensitiveEdit.Value := normalized.Value
+        this.RefreshSensitiveList()
+        this.QueueAutoSave(true)
+        return true
+    }
+
+    RemoveSensitiveExecutable(*) {
+        selectedIndex := this.SensitiveList.Value
+        if !selectedIndex {
+            this.SetStatus("Select an app to remove.", true)
+            return false
+        }
+        items := this.SensitiveItems()
+        items.RemoveAt(selectedIndex)
+        value := ""
+        for item in items
+            value .= (value ? ";" : "") item
+        this.SensitiveEdit.Value := value
+        this.RefreshSensitiveList()
+        this.QueueAutoSave(true)
+        return true
+    }
+
+    OpenDiagnosticsFolder(*) {
+        logDir := SettingsManager.SettingsDir "\logs"
+        try DirCreate(logDir)
+        try Run('explorer.exe "' logDir '"')
+        catch {
+            this.SetStatus("The troubleshooting log folder could not be opened.", true)
+            return false
+        }
+        return true
+    }
+
+    SensitiveItems() {
+        value := Trim(this.SensitiveEdit.Value)
+        return value ? StrSplit(value, ";") : []
+    }
+
+    RefreshSensitiveList() {
+        this.SensitiveList.Delete()
+        items := this.SensitiveItems()
+        if items.Length
+            this.SensitiveList.Add(items)
+        SettingsRenderer.SetEnabled(this.RemoveSensitiveButton, items.Length > 0)
+    }
+
     LoadValues(settings) {
         this.Loading := true
         this.Settings := settings
         this.FocusKeyEdit.Value := settings["focusKey"]
-        this.ThemeList.Choose(Map("system", 1, "dark", 2, "light", 3)[settings["theme"]])
-        this.MonitorList.Choose(Map("active", 1, "primary", 2, "remembered", 3)[
-            settings["openingMonitor"]])
-        this.PositionList.Choose(settings["openingPosition"] = "remembered" ? 2 : 1)
-        this.PanelWidthEdit.Value := settings["panelWidth"]
+        SettingsRenderer.SetValue(this.FocusKeyRecorder,
+            this.FormatHotkey(settings["focusKey"]))
+        themeIndex := Map("system", 1, "dark", 2, "light", 3)[settings["theme"]]
+        this.ThemeList.Choose(themeIndex)
+        this.SetSegmentValue("theme", settings["theme"])
+        monitorIndex := Map("active", 1, "primary", 2,
+            "remembered", 3)[settings["openingMonitor"]]
+        this.MonitorList.Choose(monitorIndex)
+        this.SetSegmentValue("openingMonitor", settings["openingMonitor"])
+        this.SetPlacementValue(settings["openingPosition"])
+        this.ScaleList.Choose(Map("compact", 1, "standard", 2,
+            "large", 3)[settings["launcherScale"]])
         this.SensitiveEdit.Value := settings["sensitiveApplications"]
         this.DeviceNameEdit.Value := settings.Has("deviceName")
             ? settings["deviceName"] : SubStr(A_ComputerName " Launcher", 1, 80)
@@ -594,38 +1108,37 @@ class SettingsDialog {
             this.ToggleValues[key] := settings[key]
             SettingsRenderer.SetState(control, settings[key])
         }
+        this.RefreshSensitiveList()
         this.Status.Text := ""
+        this.InlineStatus.Visible := false
+        this.FocusKeyError.Text := ""
         this.PendingSave := false
         this.RefreshConnectionControls()
+        this.RefreshCalendarControls()
         this.Loading := false
     }
 
     Candidate() {
-        widthText := Trim(this.PanelWidthEdit.Value, " `t")
-        if !RegExMatch(widthText, "^\d+$")
-            return {Ok: false, Message: "Enter a panel width from 280 through 640."}
-        width := Integer(widthText)
-        if width < SettingsManager.MinimumPanelWidth
-            || width > SettingsManager.MaximumPanelWidth
-            return {Ok: false, Message: "Enter a panel width from 280 through 640."}
+        scaleValues := ["compact", "standard", "large"]
+        scale := scaleValues[this.ScaleList.Value]
         exclusions := SettingsManager.NormalizeSensitiveApplications(
             this.SensitiveEdit.Value)
         if !exclusions.Ok
             return {Ok: false,
-                Message: "Enter app file names ending in .exe, separated by semicolons."}
+                Message: "Ignored apps must be executable names ending in .exe."}
         deviceName := RegExReplace(Trim(this.DeviceNameEdit.Value), "\s+", " ")
         if StrLen(deviceName) < 1 || StrLen(deviceName) > 80
             || RegExMatch(deviceName, "[\x00-\x1F\x7F]")
             return {Ok: false, Message: "Enter a device name from 1 to 80 characters."}
         monitorValues := ["active", "primary", "remembered"]
-        positionValues := ["right", "remembered"]
         themeValues := ["system", "dark", "light"]
         return {Ok: true, Values: Map(
             "focusKey", Trim(this.FocusKeyEdit.Value, " `t"),
             "startWithWindows", this.ToggleValues["startWithWindows"],
             "openingMonitor", monitorValues[this.MonitorList.Value],
-            "openingPosition", positionValues[this.PositionList.Value],
-            "panelWidth", width,
+            "openingPosition", this.OpeningPositionValue,
+            "launcherScale", scale,
+            "panelWidth", SettingsManager.PanelWidthForScale(scale),
             "alwaysOnTop", this.ToggleValues["alwaysOnTop"],
             "closeOnFocusLost", this.ToggleValues["closeOnFocusLost"],
             "closeAfterSelection", this.ToggleValues["closeAfterSelection"],
@@ -633,7 +1146,7 @@ class SettingsDialog {
             "clipboardPaused", this.ToggleValues["clipboardPaused"],
             "sensitiveApplications", exclusions.Value,
             "theme", themeValues[this.ThemeList.Value],
-            "reducedMotion", this.ToggleValues["reducedMotion"],
+            "reducedMotion", true,
             "loggingEnabled", this.ToggleValues["loggingEnabled"],
             "deviceName", deviceName
         )}
@@ -641,14 +1154,22 @@ class SettingsDialog {
 
     QueueAutoSave(immediate := false) {
         if this.Loading || this.Closed
-            return
+            return false
         this.PendingSave := true
         this.RevertFailedSave := immediate
+        this.SetSavingStatus()
         try SetTimer(this.AutoSaveTimer, 0)
         if immediate
-            this.AutoSave()
-        else
-            SetTimer(this.AutoSaveTimer, -350)
+            return this.AutoSave()
+        SetTimer(this.AutoSaveTimer, -350)
+        return true
+    }
+
+    SetSavingStatus() {
+        SetTimer(this.StatusHideTimer, 0)
+        this.Status.SetFont("s9 c" ThemeManager.Hex("MutedText"),
+            "Segoe UI Variable Text")
+        this.Status.Text := "Saving..."
     }
 
     AutoSave(*) {
@@ -691,12 +1212,6 @@ class SettingsDialog {
         result := HotkeyManager.Validate(Trim(this.FocusKeyEdit.Value, " `t"))
         this.SetStatus(result.Ok ? "Shortcut is available."
             : "This shortcut is invalid, reserved, or unavailable.", !result.Ok)
-    }
-
-    ShowMoreMenu() {
-        advancedMenu := Menu()
-        advancedMenu.Add("Advanced settings", (*) => this.ShowSection("advanced"))
-        advancedMenu.Show()
     }
 
     ConfirmReset() {
@@ -746,6 +1261,30 @@ class SettingsDialog {
             this.RefreshConnectionControls()
     }
 
+    OnCalendarChanged(*) {
+        if !this.Closed
+            this.RefreshCalendarControls()
+    }
+
+    RefreshCalendarNow() {
+        if !IsObject(this.CalendarManager)
+            return false
+        return this.CalendarManager.Refresh()
+    }
+
+    RefreshCalendarControls() {
+        if !IsObject(this.CalendarRefreshButton)
+            return
+        manager := this.CalendarManager
+        this.CalendarStatus.Text := IsObject(manager) ? manager.Detail
+            : "Calendar controls are unavailable in this isolated window."
+        hasCredential := IsObject(this.ConnectionManager)
+            && this.ConnectionManager.Credential
+        busy := IsObject(manager) && manager.RequestBusy
+        SettingsRenderer.SetEnabled(this.CalendarRefreshButton,
+            IsObject(manager) && hasCredential && !busy)
+    }
+
     RefreshConnectionControls() {
         manager := this.ConnectionManager
         state := IsObject(manager) ? manager.State : "unavailable"
@@ -773,25 +1312,34 @@ class SettingsDialog {
             SettingsRenderer.SetEnabled(control, IsObject(manager) && !busy)
         this.DeviceNameEdit.Enabled := !waiting && !connected
         if recoveryPairing {
-            this.RetryConnectionButton.Move(24, 306, 276, 38)
-            this.CancelConnectionButton.Move(320, 306, 276, 38)
+            this.RetryConnectionButton.Move(232, 334, 238, 40)
+            this.CancelConnectionButton.Move(486, 334, 238, 40)
         } else if recoveryCredential {
-            this.RetryConnectionButton.Move(24, 306, 276, 38)
-            this.DisconnectButton.Move(320, 306, 276, 38)
+            this.RetryConnectionButton.Move(232, 334, 238, 40)
+            this.DisconnectButton.Move(486, 334, 238, 40)
         } else {
-            this.ConnectButton.Move(24, 306, 572, 38)
-            this.CancelConnectionButton.Move(24, 306, 572, 38)
-            this.DisconnectButton.Move(24, 306, 572, 38)
+            this.ConnectButton.Move(232, 334, 492, 40)
+            this.CancelConnectionButton.Move(232, 334, 492, 40)
+            this.DisconnectButton.Move(232, 334, 492, 40)
         }
         if !this.Loading
             WindowsInterop.AnnounceStatus(this.ConnectionStatus)
     }
 
+    InitialSection() {
+        if !IsObject(this.ConnectionManager)
+            return "general"
+        state := this.ConnectionManager.State
+        return state = "waiting" || state = "starting" || state = "exchanging"
+            || (this.ConnectionManager.RequestId && this.ConnectionManager.PairingSecret)
+            ? "account" : "general"
+    }
+
     ShowSection(section, *) {
         if !this.Pages.Has(section)
             section := "general"
+        this.StopPageAnimation()
         this.CurrentSection := section
-        ; Avoid the old full-window theme pass and suppress intermediate layout paints.
         DllCall("SendMessageW", "ptr", this.Gui.Hwnd, "uint", 0x000B,
             "ptr", 0, "ptr", 0)
         for pageName, controls in this.Pages {
@@ -801,31 +1349,105 @@ class SettingsDialog {
         }
         for key, tab in this.Tabs
             SettingsRenderer.SetSelected(tab, key = section)
+        this.InlineStatus.Visible := false
         this.RefreshConnectionControls()
+        this.RefreshCalendarControls()
         DllCall("SendMessageW", "ptr", this.Gui.Hwnd, "uint", 0x000B,
             "ptr", 1, "ptr", 0)
         DllCall("RedrawWindow", "ptr", this.Gui.Hwnd, "ptr", 0, "ptr", 0,
             "uint", 0x0001 | 0x0004 | 0x0080 | 0x0100)
-        firstControl := section = "general" ? this.FocusKeyEdit
-            : section = "clipboard" ? this.CloseOnFocusLostCheck
-            : section = "account" ? this.DeviceNameEdit : this.MonitorList
-        if this.IsVisible()
+        this.RaiseSidebarLabels()
+        if this.IsVisible() {
+            this.AnimatePage(section)
+            firstControl := section = "general" ? this.FocusKeyRecorder
+                : section = "behavior" ? this.SegmentControls["openingMonitor"][1].Control
+                : section = "clipboard" ? this.ClipboardPausedCheck
+                : section = "appearance" ? this.SegmentControls["theme"][1].Control
+                : section = "account" ? this.DeviceNameEdit : this.DiagnosticsCheck
             firstControl.Focus()
+        }
+    }
+
+    AnimatePage(section) {
+        if ThemeManager.ReducedMotion || this.TestMode
+            return
+        this.PageAnimationControls := this.Pages[section]
+        this.PageAnimationStart := A_TickCount
+        for control in this.PageAnimationControls {
+            if this.PageLayouts.Has(control.Hwnd) {
+                layout := this.PageLayouts[control.Hwnd]
+                try control.Move(layout.X + 12, layout.Y, layout.Width, layout.Height)
+            }
+        }
+        SetTimer(this.PageAnimationTimer, 16)
+    }
+
+    AnimatePageFrame(*) {
+        if this.Closed {
+            SetTimer(this.PageAnimationTimer, 0)
+            return
+        }
+        progress := Min((A_TickCount - this.PageAnimationStart) / 140, 1)
+        eased := 1 - (1 - progress) ** 3
+        offset := Round(12 * (1 - eased))
+        for control in this.PageAnimationControls {
+            if this.PageLayouts.Has(control.Hwnd) {
+                layout := this.PageLayouts[control.Hwnd]
+                try control.Move(layout.X + offset, layout.Y, layout.Width, layout.Height)
+            }
+        }
+        DllCall("RedrawWindow", "ptr", this.Gui.Hwnd, "ptr", 0, "ptr", 0,
+            "uint", 0x0001 | 0x0004 | 0x0080 | 0x0100)
+        if progress >= 1 {
+            SetTimer(this.PageAnimationTimer, 0)
+            this.RaiseSidebarLabels()
+        }
+    }
+
+    RaiseSidebarLabels() {
+        for control in [this.Brand, this.SidebarHint]
+            try DllCall("InvalidateRect", "ptr", control.Hwnd,
+                "ptr", 0, "int", true)
+    }
+
+    StopPageAnimation() {
+        try SetTimer(this.PageAnimationTimer, 0)
+        if this.HasOwnProp("PageAnimationControls") {
+            for control in this.PageAnimationControls {
+                if this.PageLayouts.Has(control.Hwnd) {
+                    layout := this.PageLayouts[control.Hwnd]
+                    try control.Move(layout.X, layout.Y, layout.Width, layout.Height)
+                }
+            }
+        }
     }
 
     SetStatus(text, isError := false) {
+        SetTimer(this.StatusHideTimer, 0)
         this.Status.SetFont("s9 c" ThemeManager.Hex(
             isError ? "ErrorText" : "SuccessText"), "Segoe UI Variable Text")
-        this.Status.Text := text
-        WindowsInterop.AnnounceStatus(this.Status)
+        this.Status.Text := isError ? "Needs attention" : text
+        this.InlineStatus.SetFont("s9 c" ThemeManager.Hex("ErrorText"),
+            "Segoe UI Variable Text")
+        this.InlineStatus.Text := isError ? text : ""
+        this.InlineStatus.Visible := isError
+        WindowsInterop.AnnounceStatus(isError ? this.InlineStatus : this.Status)
+        if !isError
+            SetTimer(this.StatusHideTimer, -1600)
+    }
+
+    HideSavedStatus(*) {
+        if !this.Closed && this.Status.Text = "Saved"
+            this.Status.Text := ""
     }
 
     ApplyTheme() {
         this.Gui.BackColor := ThemeManager.Hex("Window")
+        for surface in this.SurfaceControls
+            try surface.Control.Opt("Background" ThemeManager.Hex(surface.Color))
         for control in this.TextControls
             control.SetFont("c" ThemeManager.Hex("Text"), "Segoe UI Variable Text")
-        for control in [this.Intro, this.ClipboardNote, this.ConnectionStatus,
-            this.AccountNote]
+        for control in this.MutedTextControls
             control.SetFont("c" ThemeManager.Hex("MutedText"),
                 "Segoe UI Variable Text")
         for control in this.InputControls
@@ -833,12 +1455,22 @@ class SettingsDialog {
                 " c" ThemeManager.Hex("Text"))
         dark := ThemeManager.Mode = "dark"
         darkValue := dark ? 1 : 0
+        cornerPreference := 2 ; DWMWCP_ROUND
+        backdropType := 2 ; DWMSBT_MAINWINDOW
         try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", this.Gui.Hwnd,
             "uint", 20, "int*", &darkValue, "uint", 4)
+        try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", this.Gui.Hwnd,
+            "uint", 33, "int*", &cornerPreference, "uint", 4)
+        try DllCall("dwmapi\DwmSetWindowAttribute", "ptr", this.Gui.Hwnd,
+            "uint", 38, "int*", &backdropType, "uint", 4)
         themeName := dark ? "DarkMode_Explorer" : "Explorer"
         for control in this.InputControls
             try DllCall("uxtheme\SetWindowTheme", "ptr", control.Hwnd,
                 "str", themeName, "ptr", 0)
+        ; Combo boxes use the common-file-dialog theme class on modern Windows;
+        ; Explorer's dark class leaves the closed field stark white.
+        try DllCall("uxtheme\SetWindowTheme", "ptr", this.ScaleList.Hwnd,
+            "str", dark ? "DarkMode_CFD" : "CFD", "ptr", 0)
         for control in this.DrawnControls
             DllCall("InvalidateRect", "ptr", control.Hwnd, "ptr", 0, "int", true)
     }
@@ -853,17 +1485,33 @@ class SettingsDialog {
             : SettingsDialog.LogicalHeight
         this.Gui.Show("Hide x" area.Left " y" area.Top
             " w" showWidth " h" showHeight)
-        this.Gui.GetPos(,, &width, &height)
+        windowRect := Buffer(16, 0)
+        if DllCall("GetWindowRect", "ptr", this.Gui.Hwnd, "ptr", windowRect) {
+            width := NumGet(windowRect, 8, "int") - NumGet(windowRect, 0, "int")
+            height := NumGet(windowRect, 12, "int") - NumGet(windowRect, 4, "int")
+        } else
+            this.Gui.GetPos(,, &width, &height)
         geometry := WindowsInterop.ClampWindowPosition(area,
             area.Left + Floor(((area.Right - area.Left) - width) / 2),
             area.Top + Floor(((area.Bottom - area.Top) - height) / 2),
             width, height)
-        DllCall("SetWindowPos", "ptr", this.Gui.Hwnd, "ptr", 0,
-            "int", this.TestMode ? -10000 : geometry.X,
-            "int", this.TestMode ? -10000 : geometry.Y,
-            "int", 0, "int", 0,
-            "uint", 0x0001 | 0x0040 | (this.TestMode ? 0x0010 : 0))
-        this.FocusKeyEdit.Focus()
+        if this.TestMode {
+            DllCall("SetWindowPos", "ptr", this.Gui.Hwnd, "ptr", 0,
+                "int", -10000, "int", -10000, "int", 0, "int", 0,
+                "uint", 0x0001 | 0x0040 | 0x0010)
+        } else {
+            DllCall("SetWindowPos", "ptr", this.Gui.Hwnd, "ptr", 0,
+                "int", geometry.X, "int", geometry.Y, "int", 0, "int", 0,
+                "uint", 0x0001 | 0x0010)
+            if ThemeManager.ReducedMotion
+                this.Gui.Show("NoActivate")
+            else
+                DllCall("AnimateWindow", "ptr", this.Gui.Hwnd, "uint", 140,
+                    "uint", 0x00080000 | 0x00020000)
+        }
+        firstControl := this.CurrentSection = "account"
+            ? this.DeviceNameEdit : this.FocusKeyRecorder
+        firstControl.Focus()
     }
 
     IsVisible() {
@@ -879,8 +1527,13 @@ class SettingsDialog {
         if this.Closed
             return
         try SetTimer(this.AutoSaveTimer, 0)
+        try SetTimer(this.StatusHideTimer, 0)
+        this.StopPageAnimation()
         if this.PendingSave
             this.AutoSave()
+        if !this.TestMode && !ThemeManager.ReducedMotion && this.IsVisible()
+            try DllCall("AnimateWindow", "ptr", this.Gui.Hwnd, "uint", 90,
+                "uint", 0x00090000)
         this.Closed := true
         this.Tooltips.Destroy()
         try OnMessage(0x0111, this.CommandHandler, 0)

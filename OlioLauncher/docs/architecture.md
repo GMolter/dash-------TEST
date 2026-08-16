@@ -32,20 +32,20 @@ remain the separate, default-cancel **Disconnect Olio Account** action.
 
 The native `SettingsDialog` is a standalone top-level application window, not an owned
 dialog stacked on an intermediate launcher page. The launcher Settings action opens it
-directly and hides the compact launcher. A compact horizontal tab strip exposes General,
-Clipboard & paste, and Account; a low-emphasis overflow button opens the deliberately
-unadvertised Advanced section. Advanced contains monitor/position tuning, panel width,
-always-on-top, diagnostics, executable exclusions, and reset. Custom-drawn switch cards,
-tabs, and actions retain native button semantics and accessible names without exposing
+directly and hides the compact launcher. A persistent sidebar exposes General, Behavior,
+Clipboard, Appearance, Account, and Advanced. Behavior contains monitor selection, the
+Upper right and Middle right anchors, and Compact, Standard, and Large scale presets.
+Advanced contains the local troubleshooting log and reset. Custom-drawn switches,
+navigation, and actions retain native button semantics and accessible names without exposing
 classic checkbox chrome. Selection changes validate and persist immediately; typed
 fields use a short 350 ms debounce before the same transactional save path. There is no
 separate Save/Cancel workflow. Each feature has a keyboard-reachable accessible name,
 and the complete setting or label is registered with a native Win32 hover tooltip; no
 visible tooltip buttons compete with the controls. Section changes suspend redraw and do
 not reapply the palette, keeping navigation responsive. The same window exposes Focus
-Key, per-user startup, monitor, position, width, always-on-top, click-away hiding,
+Key, per-user startup, monitor, position, scale, always-on-top, click-away hiding,
 close-after-selection, opt-in auto-paste, clipboard pause, plain-language Clipboard
-History app exclusions, theme, reduced motion, redacted diagnostics, and Olio account
+History app exclusions, theme, minimized motion, troubleshooting, and Olio account
 connect/cancel/retry/confirmed-disconnect controls. Focus Key validation rejects malformed, reserved, or
 unavailable keys before persistence and emits generic errors. Saving applies hotkey and
 HKCU startup side effects transactionally and rolls them back if the settings file cannot
@@ -54,11 +54,12 @@ be replaced. No path requests elevation.
 `WindowsInterop` enumerates physical monitor work rectangles and names. Active selects the
 foreground window's monitor; primary selects the flagged primary; remembered first
 matches the saved monitor name and otherwise chooses the work area nearest the saved
-coordinates. Right-edge placement uses `rcWork`. Remembered coordinates are clamped with
-the DPI-scaled width and current view height so removed displays, negative coordinates,
-taskbar work areas, width changes, and DPI changes cannot strand the panel. The header can
+coordinates. Right-edge placement uses `rcWork`. Coordinates are clamped with the
+DPI-scaled preset width and current view height so removed displays, negative coordinates,
+taskbar work areas, scale changes, and DPI changes cannot strand the panel. The header can
 be dragged; `WM_EXITSIZEMOVE` persists only its resulting non-sensitive monitor and
-coordinates. Panel width remains 280–640 logical pixels.
+coordinates. Schema version 2 retains `panelWidth` only as a compatibility value derived
+from the selected scale preset.
 
 Selection policy is shared by Clipboard History and Quick Pastes. With both settings off,
 the Milestone 6 behavior remains: selection publishes through
@@ -78,8 +79,8 @@ nor content is logged.
 `ThemeManager` resolves system, dark, and light preferences and overrides them with
 Windows high-contrast system colors when high contrast is active. Owner-drawn buttons,
 Clipboard cards, Quick Paste cards, previews, text, disabled state, border, and focus
-colors read from the same palette. Reduced motion removes nonessential hover transitions;
-it never removes input or functionality. Native Tab/Shift+Tab order, directional
+colors read from the same palette. Motion is permanently minimized, including hover and
+selection transitions; this never removes input or functionality. Native Tab/Shift+Tab order, directional
 navigation, Enter, Space on item lists, Escape, owner-drawn focus rings, default-cancel
 destructive confirmations, labels, control text, and Windows accessibility change
 notifications cover keyboard and assistive-technology use.
@@ -217,9 +218,16 @@ virtual rectangle with `SetWindowPos`. Negative origins and monitor-spanning rec
 therefore remain physical screen pixels instead of logical or primary-monitor-relative
 coordinates.
 
-The overlay paints a translucent Olio Workstation surface, readable instructions, a cyan
-selection border, and live pixel dimensions. `WM_SETCURSOR` supplies the shared Windows
-crosshair cursor. Mouse capture keeps reverse-direction and cross-monitor drags coherent;
+After any requested launcher hide is synchronized with desktop composition, one
+full-virtual-desktop bitmap is captured in memory. The opaque overlay paints that frozen
+activation frame with a dim treatment outside the selection, an undimmed selection
+cutout, a crisp pixel-aligned purple border, and a compact instruction surface.
+The dimmed frame remains a static parent surface. The undimmed selection and its border
+are composed off-screen into one click-through layered surface. `UpdateLayeredWindow`
+presents its pixels, size, and screen position to DWM atomically, avoiding stale resize
+frames, old/new border invalidation races, and full-desktop repaints during a drag.
+`WM_SETCURSOR` supplies the shared Windows crosshair cursor. Mouse capture keeps
+reverse-direction and cross-monitor drags coherent;
 `WM_KEYDOWN` handles Escape without installing a temporary global keyboard hook. Empty
 rectangles are rejected before clipboard access. Rapid activation is idempotent while a
 selection is active, and the Focus Key cannot open a second launcher over the overlay. A
@@ -230,9 +238,11 @@ second press cancels that pending toggle, so direct capture does not change any 
 launcher or preview window state. Click-away close is suspended only until direct capture
 finishes; the Screenshot tile retains the hide-before-capture path.
 
-On success, the overlay is destroyed before capture. A screen DC, compatible memory DC,
-and compatible bitmap are created in process; `BitBlt` uses `SRCCOPY | CAPTUREBLT`; the
-original selected GDI object is restored; and both DCs are released. Clipboard opening is
+On success, the selected rectangle is copied from the frozen activation bitmap before the
+overlay is destroyed, so later screen changes cannot enter the result. A screen DC,
+compatible memory DC, and compatible bitmap are created in process; the initial frame
+capture uses `SRCCOPY | CAPTUREBLT`, and the selection crop uses `SRCCOPY`. Original
+selected GDI objects are restored and every DC is released. Clipboard opening is
 retried for bounded transient contention. A successful `SetClipboardData(CF_BITMAP)`
 transfers the bitmap to Windows; every unsuccessful bitmap remains launcher-owned and is
 deleted. Before ownership transfer, Clipboard History copies the bitmap into its existing
@@ -347,9 +357,10 @@ new single-press sequence.
 2. On activation, save the foreground HWND for later focus restoration.
 3. Resolve its nearest monitor with `MonitorFromWindow(..., MONITOR_DEFAULTTONEAREST)`.
 4. read the physical work rectangle with `GetMonitorInfoW`.
-5. Scale the configured logical panel width by the monitor DPI; use the work-area height.
-6. Place the panel at `work.right - width, work.top` without assuming nonnegative
-   coordinates.
+5. Resolve Compact (90%), Standard (100%), or Large (115%) dimensions and scale the
+   logical width by the monitor DPI.
+6. Place the panel against `work.right` at the configured upper-right or middle-right
+   anchor without assuming nonnegative coordinates.
 7. On `WM_DPICHANGED`, apply Windows' suggested rectangle atomically with `SetWindowPos`.
 8. Re-resolve geometry after display, taskbar, sleep/resume, and dock-topology changes.
 

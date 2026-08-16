@@ -13,6 +13,7 @@
 #Include ..\src\TileRenderer.ahk
 #Include ..\src\ClipboardRenderer.ahk
 #Include ..\src\QuickPastesRenderer.ahk
+#Include ..\src\CalendarRenderer.ahk
 #Include ..\src\ClipboardPreviewWindow.ahk
 #Include ..\src\SettingsDialog.ahk
 #Include ..\src\LauncherWindow.ahk
@@ -125,17 +126,17 @@ class Milestone1Tests {
         settings := SettingsManager.Defaults()
         window := LauncherWindow(settings, (*) => 0)
         this.Assert(!window.IsVisible(), "Launcher must be hidden before Show.")
-        this.Assert(window.Wordmark.Text = "Launcher", "Launcher header title is incorrect.")
+        this.Assert(window.Wordmark.Text = "Olio Launcher", "Launcher header title is incorrect.")
         this.Assert(FileExist(LauncherWindow.BrandIconPath()), "Launcher brand icon is missing.")
         this.Assert(window.AutoCloseOnDeactivate, "Launcher must close when another window is activated.")
-        this.Assert(window.Buttons["sendToPhone"].Enabled = false, "Send to Phone must be disabled.")
+        this.Assert(window.Buttons["calendar"].Enabled = true, "Calendar must be enabled.")
         this.Assert(window.Buttons["networkAnalyzer"].Enabled = false, "Network Analyzer must be disabled.")
         this.Assert(window.Buttons["clipboard"].Enabled = true, "Foundation navigation must be enabled.")
         this.Assert(window.DesiredLogicalHeight = 286, "Compact panel height changed unexpectedly.")
         this.Assert(LauncherWindow.CenteredY(0, 1080, 286) = 397,
             "Panel is not vertically centered in its work area.")
         accents := Map()
-        for key in ["clipboard", "screenshot", "quickPastes", "sendToPhone", "networkAnalyzer"]
+        for key in ["clipboard", "screenshot", "quickPastes", "calendar", "networkAnalyzer"]
             accents[TileRenderer.Tiles[window.Buttons[key].Hwnd].Accent] := true
         this.Assert(accents.Count = 5, "Tool accents must remain visually distinct.")
         settingsRect := Buffer(16, 0), clipboardRect := Buffer(16, 0)
@@ -147,12 +148,15 @@ class Milestone1Tests {
         settingsTile := TileRenderer.Tiles[window.Buttons["settings"].Hwnd]
         this.Assert(settingsTile.IconKind = "settings-2", "Settings must use Lucide settings-2 geometry.")
         this.Assert(settingsTile.Title = "Settings", "Settings pill must retain its visible label.")
-        this.Assert(window.SettingsLabel.Text = "Settings", "Settings overlay label is missing.")
+        this.Assert(settingsTile.DrawLabel && !window.SettingsLabel.Visible,
+            "Settings is not rendered as one seamless owner-drawn control.")
         settingsStyle := DllCall("User32\GetWindowLongW", "ptr",
             window.Buttons["settings"].Hwnd, "int", -16, "uint")
         this.Assert(settingsStyle & 0x04000000,
             "Settings button must clip the overlay label sibling during redraw.")
-        this.Assert(window.BackLabel.Text = "Back", "Back overlay label is missing.")
+        this.Assert(TileRenderer.Tiles[window.BackButton.Hwnd].DrawLabel
+            && !window.BackLabel.Visible,
+            "Back is not rendered as one seamless owner-drawn control.")
         backStyle := DllCall("User32\GetWindowLongW", "ptr",
             window.BackButton.Hwnd, "int", -16, "uint")
         this.Assert(backStyle & 0x04000000,
@@ -184,7 +188,8 @@ class Milestone1Tests {
         this.Assert(window.CurrentView = "quickPastes", "Native tile WM_COMMAND did not activate its view.")
         this.Assert(window.PageKey = "quickPastes", "Quick Pastes tile did not open its page.")
         this.Assert(window.PageTitle.Text = "Quick Pastes", "Quick Pastes page title is incorrect.")
-        this.Assert(window.BackLabel.Visible, "Back label is not visible on a tool page.")
+        this.Assert(window.BackButton.Visible && !window.BackLabel.Visible,
+            "The owner-drawn Back control is not visible on a tool page.")
         this.Assert(!window.Buttons["clipboard"].Visible, "Home tiles remained visible on a tool page.")
         window.OnCommand(0, window.BackButton.Hwnd, 0, window.Gui.Hwnd)
         this.Assert(window.PageKey = "" && window.Buttons["clipboard"].Visible,
@@ -245,9 +250,9 @@ class Milestone1Tests {
         clipboardWindow.ActivateClipboardSelection(10)
         this.Assert(clipboardWindow.IsVisible(),
             "Selecting a Clipboard entry unexpectedly closed the launcher.")
-        this.Assert(!clipboardWindow.Buttons["sendToPhone"].Enabled
+        this.Assert(clipboardWindow.Buttons["calendar"].Enabled
             && !clipboardWindow.Buttons["networkAnalyzer"].Enabled,
-            "Deferred placeholders became interactive on the Clipboard page.")
+            "Calendar or deferred Network tile state changed on the Clipboard page.")
 
         previewDib := Buffer(56, 0)
         NumPut("uint", 40, previewDib, 0)

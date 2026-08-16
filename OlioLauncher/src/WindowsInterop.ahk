@@ -116,6 +116,27 @@ class WindowsInterop {
         }
     }
 
+    static OpeningCoordinates(area, width, height, position,
+        rememberedX := 0, rememberedY := 0, rememberedPositionValid := false) {
+        if position = "remembered" && rememberedPositionValid
+            return {X: rememberedX, Y: rememberedY}
+        if position = "right"
+            position := "middle-right"
+        parts := StrSplit(position, "-")
+        vertical := parts.Length >= 1 ? parts[1] : "middle"
+        horizontal := parts.Length >= 2 ? parts[2] : "right"
+        usableWidth := Max(1, area.Right - area.Left)
+        usableHeight := Max(1, area.Bottom - area.Top)
+        x := horizontal = "left" ? area.Left
+            : horizontal = "center"
+                ? area.Left + Floor((usableWidth - width) / 2)
+                : area.Right - width
+        y := vertical = "top" ? area.Top
+            : vertical = "bottom" ? area.Bottom - height
+            : area.Top + Max(0, Floor((usableHeight - height) / 2))
+        return {X: x, Y: y}
+    }
+
     static ResolveOpeningGeometry(settings, logicalHeight, foregroundHwnd := 0,
         areas := 0) {
         if !IsObject(areas)
@@ -127,13 +148,10 @@ class WindowsInterop {
         width := Round(settings["panelWidth"] * area.Dpi / 96)
         height := Min(Round(logicalHeight * area.Dpi / 96),
             area.Bottom - area.Top)
-        x := settings["openingPosition"] = "remembered"
-            && settings["rememberedPositionValid"]
-            ? settings["rememberedX"] : area.Right - width
-        y := settings["openingPosition"] = "remembered"
-            && settings["rememberedPositionValid"]
-            ? settings["rememberedY"]
-            : area.Top + Max(0, Floor(((area.Bottom - area.Top) - height) / 2))
+        coordinates := this.OpeningCoordinates(area, width, height,
+            settings["openingPosition"], settings["rememberedX"],
+            settings["rememberedY"], settings["rememberedPositionValid"])
+        x := coordinates.X, y := coordinates.Y
         geometry := this.ClampWindowPosition(area, x, y, width, height)
         geometry.Area := area
         geometry.Foreground := foregroundHwnd

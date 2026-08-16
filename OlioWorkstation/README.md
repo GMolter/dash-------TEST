@@ -14,6 +14,21 @@ reviewed `quick-pastes:read` scope for newly approved devices and read-only, own
 synchronization through the existing `/api/launcher` function. Existing devices are not
 silently upgraded.
 
+Google Calendar integration uses the same `/api/launcher` boundary. Workstation owns the
+read-only Google OAuth grant and stores the refresh token with AES-256-GCM encryption;
+the launcher receives only bounded event fields for the remainder of the local day. Apply
+`supabase/migrations/20260815090000_add_launcher_google_calendar.sql` and configure these
+server-only variables in Vercel:
+
+- `GOOGLE_CALENDAR_CLIENT_ID`
+- `GOOGLE_CALENDAR_CLIENT_SECRET`
+- `GOOGLE_CALENDAR_REDIRECT_URI` (for example, `https://olio.one/api/launcher?oauth=google-calendar`)
+- `GOOGLE_OAUTH_STATE_SECRET`
+- `CALENDAR_TOKEN_ENCRYPTION_KEY` (32 random bytes encoded as 64 hex characters or base64)
+
+Enable the Google Calendar API and register the exact redirect URI in the Google Cloud
+OAuth client. None of these values may use the `VITE_` prefix.
+
 ## Commands
 
 The Vercel Hobby deployment is intentionally limited to 12 production files under

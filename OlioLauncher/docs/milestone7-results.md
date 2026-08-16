@@ -12,12 +12,12 @@ Run date: 2026-07-18 (America/Indianapolis)
   Advanced section for infrequent controls
 - Immediate validated auto-save for choices, 350 ms debounced auto-save for typed fields,
   and native whole-setting hover tooltips without visible help buttons
-- Owner-drawn switch cards, tabs, and actions with native control semantics; redraw
+- Owner-drawn switches, sidebar navigation, and actions with native control semantics; redraw
   suppression and palette reuse make section switching immediate
 - Settings schema version 2, explicit version-1 migration, independent invalid-field
   recovery, future-field tolerance, corrupt-file backup, and atomic replacement
-- Safe defaults for Focus Key, HKCU startup, monitor, position, width, topmost/focus-loss,
-  item-close/auto-paste, capture pause, exclusions, theme, reduced motion, diagnostics,
+- Safe defaults for Focus Key, HKCU startup, monitor, position, scale, topmost/focus-loss,
+  item-close/auto-paste, capture pause, exclusions, theme, minimized motion, diagnostics,
   selection, remembered placement, and non-sensitive device metadata
 - Pre-auto-save generic Focus Key invalid/reserved/conflict detection and transactional
   hotkey/startup rollback
@@ -43,8 +43,8 @@ scope, RLS rule, Quick Paste ownership rule, or Vercel entrypoint changed.
 | Focus Key | `#+F23` |
 | Start with Windows | Off |
 | Opening monitor | Active |
-| Opening position | Right edge |
-| Panel width | 360 logical pixels; accepted range 280–640 |
+| Opening position | Middle right; Upper right also available |
+| Launcher scale | Standard (100%); Compact (90%) and Large (115%) also available |
 | Always on top | On |
 | Hide the launcher when I click elsewhere | On |
 | Close after choosing an item | Off |
@@ -52,7 +52,6 @@ scope, RLS rule, Quick Paste ownership rule, or Vercel entrypoint changed.
 | Clipboard History capture | Active |
 | Sensitive applications | KeePass, KeePassXC, 1Password, and Bitwarden executable names |
 | Theme | Follow Windows |
-| Reduced motion | Off |
 | Redacted diagnostics | Off |
 | Olio account | Disconnected on a new device; existing protected connection retained |
 
@@ -123,7 +122,7 @@ credential, or touch the Windows clipboard.
 - Status changes issue Windows accessibility name-change notifications.
 - Dark and light primary/muted text contrast meet tested readable ratios.
 - High contrast resolves Windows system colors instead of a forced theme.
-- Reduced motion removes hover transitions without removing functionality.
+- Motion is permanently minimized without removing functionality.
 - Pure geometry verifies 96, 120, and 144 DPI width scaling and negative monitor work
   areas. The standalone Settings window and controls use native Per-Monitor V2 scaling.
 
@@ -169,13 +168,12 @@ Do not stop a normal resident launcher merely to run this checklist.
    prior key continues working.
 5. Enable and disable Start with Windows. Confirm only the current user's
    `HKCU\...\Run\OlioLauncher` value changes and no UAC prompt appears.
-6. Open **•••** → **Advanced settings**. Test Active and Primary monitor. Drag the header,
-   choose Remembered monitor/position, close/reopen, and confirm the panel returns within
-   the work area.
+6. Open **Behavior**. Test Active and Primary monitor, then verify Upper right and Middle
+   right remain inside the selected work area.
 7. If safe, disconnect/reconnect a secondary monitor and change 100%, 125%, and 150%
    scaling. Confirm removed/off-screen placement recovers and all text remains readable.
-8. In Advanced, test panel widths 280, 360, and 640. Confirm cards, actions, and focus
-   remain visible.
+8. In Behavior, test Compact, Standard, and Large. Confirm the shell, cards, actions, and
+   focus treatment scale together and remain visible.
 9. Toggle Always on top and Hide the launcher when I click elsewhere. Confirm each changes
    immediately.
 10. With both selection options off, choose harmless Clipboard and Quick Paste items.
@@ -189,7 +187,7 @@ Do not stop a normal resident launcher merely to run this checklist.
     Select an existing item and confirm deliberate copy/paste still works.
 14. Add a harmless disposable executable name to exclusions and confirm only its
     clipboard capture is ignored. Confirm invalid paths and non-`.exe` entries are rejected.
-15. Check Follow Windows, Dark, Light, Windows high contrast, and Reduced motion.
+15. Check Follow Windows, Dark, Light, and Windows high contrast.
     Confirm owner-drawn controls, disabled placeholders, status text, and focus remain
     readable.
 16. Enable diagnostics, perform ordinary actions, and inspect only metadata tokens.

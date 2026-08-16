@@ -2,6 +2,15 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseServiceConfig } from './_utils/supabaseConfig.js';
 import {
+  calendarAccessToken,
+  calendarAuthorizationUrl,
+  calendarOAuthConfigured,
+  decryptCalendarToken,
+  encryptCalendarToken,
+  exchangeCalendarCode,
+  verifyCalendarOAuthState,
+} from './_utils/googleCalendar.js';
+import {
   asBytea,
   deviceActor,
   formatDisplayCode,
@@ -35,6 +44,16 @@ type LauncherQuickPaste = {
   category: string | null;
   sort_order: number;
   is_favorite: boolean;
+};
+
+type LauncherCalendarEvent = {
+  id: string;
+  title: string;
+  start_at: string;
+  end_at: string;
+  all_day: boolean;
+  ongoing: boolean;
+  location: string;
 };
 
 export const LAUNCHER_QUICK_PASTE_LIMITS = {
@@ -128,6 +147,19 @@ function bodyOf(req: VercelRequest): Record<string, unknown> {
 function bearer(req: VercelRequest): string | null {
   const raw = String(req.headers.authorization ?? '');
   return raw.toLowerCase().startsWith('bearer ') ? raw.slice(7).trim() || null : null;
+}
+
+function queryValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] || '' : value || '';
+}
+
+function profileRedirect(status: 'connected' | 'error') {
+  try {
+    const configured = new URL(process.env.GOOGLE_CALENDAR_REDIRECT_URI || '');
+    return `${configured.origin}/profile?calendar=${status}`;
+  } catch {
+    return `/profile?calendar=${status}`;
+  }
 }
 
 async function authenticatedUser(req: VercelRequest, client: ServiceClient): Promise<string | null> {
@@ -328,13 +360,151 @@ async function handleAuthorization(req: VercelRequest, res: VercelResponse, clie
   return send(res, state === 'rate_limited' ? 429 : 200, { state });
 }
 
+async function handleCalendarOAuthCallback(req: VercelRequest, res: VercelResponse, client: ServiceClient) {
+  const code = queryValue(req.query.code);
+  const userId = verifyCalendarOAuthState(queryValue(req.query.state));
+  if (!code || !userId || !calendarOAuthConfigured()) {
+    return res.redirect(302, profileRedirect('error'));
+  }
+  const refreshToken = await exchangeCalendarCode(code);
+  const encrypted = refreshToken ? encryptCalendarToken(refreshToken) : null;
+  if (!encrypted) return res.redirect(302, profileRedirect('error'));
+  const service = client as any;
+  const { error } = await service.from('google_calendar_connections').upsert({
+    owner_id: userId,
+    ...encrypted,
+    connected_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'owner_id' });
+  if (error) return res.redirect(302, profileRedirect('error'));
+  const granted = await client.rpc('grant_launcher_calendar_scope', { p_owner_id: userId });
+  return res.redirect(302, profileRedirect(granted.error ? 'error' : 'connected'));
+}
+
+async function handleCalendarAccount(
+  req: VercelRequest,
+  res: VercelResponse,
+  client: ServiceClient,
+  action: 'calendar-status' | 'calendar-connect' | 'calendar-disconnect',
+) {
+  const userId = await authenticatedUser(req, client);
+  if (!userId) return send(res, 401, { state: 'unauthenticated' });
+  const service = client as any;
+  if (action === 'calendar-connect') {
+    const authorization_url = calendarAuthorizationUrl(userId);
+    return authorization_url
+      ? send(res, 200, { state: 'ready', authorization_url })
+      : send(res, 503, { state: 'not_configured' });
+  }
+  if (action === 'calendar-disconnect') {
+    const { error } = await service.from('google_calendar_connections').delete().eq('owner_id', userId);
+    if (error) return send(res, 503, { state: 'offline' });
+    await client.rpc('revoke_launcher_calendar_scope', { p_owner_id: userId });
+    return send(res, 200, { state: 'disconnected' });
+  }
+  const { data, error } = await service.from('google_calendar_connections')
+    .select('connected_at').eq('owner_id', userId).maybeSingle();
+  if (error) return send(res, 503, { state: 'offline' });
+  return send(res, 200, data
+    ? { state: 'connected', connected_at: data.connected_at }
+    : { state: 'disconnected' });
+}
+
+function boundedDate(value: unknown) {
+  if (typeof value !== 'string' || value.length > 40) return null;
+  const timestamp = new Date(value);
+  return Number.isNaN(timestamp.valueOf()) ? null : timestamp;
+}
+
+function normalizeCalendarEvent(candidate: unknown, now: Date): LauncherCalendarEvent | null {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null;
+  const event = candidate as Record<string, any>;
+  const startValue = event.start?.dateTime || (event.start?.date ? `${event.start.date}T00:00:00Z` : '');
+  const endValue = event.end?.dateTime || (event.end?.date ? `${event.end.date}T00:00:00Z` : '');
+  const start = boundedDate(startValue);
+  const end = boundedDate(endValue);
+  if (!start || !end || typeof event.id !== 'string' || !event.id || event.id.length > 256) return null;
+  const title = typeof event.summary === 'string' && event.summary.trim()
+    ? event.summary.trim().slice(0, 160) : '(Untitled event)';
+  const location = typeof event.location === 'string' ? event.location.trim().slice(0, 160) : '';
+  return {
+    id: event.id,
+    title,
+    start_at: start.toISOString(),
+    end_at: end.toISOString(),
+    all_day: Boolean(event.start?.date && !event.start?.dateTime),
+    ongoing: start <= now && end > now,
+    location,
+  };
+}
+
+export async function handleCalendarSchedule(
+  req: VercelRequest,
+  res: VercelResponse,
+  client: ServiceClient,
+  actorKey: string,
+) {
+  const body = bodyOf(req);
+  const timeMin = boundedDate(body.time_min);
+  const timeMax = boundedDate(body.time_max);
+  if (!isUuid(body.device_id) || !isSecret(body.credential) || !timeMin || !timeMax
+    || timeMax <= timeMin || timeMax.valueOf() - timeMin.valueOf() > 36 * 60 * 60 * 1000) {
+    return send(res, 400, { state: 'invalid' });
+  }
+  const { data, error } = await client.rpc('fetch_launcher_calendar_credentials', {
+    p_device_identifier: body.device_id,
+    p_credential_hash: asBytea(sha256(body.credential)),
+    p_source_actor_hash: sourceActor(req, 'calendar-source', actorKey),
+    p_device_actor_hash: deviceActor(body.device_id, 'calendar-device', actorKey),
+  });
+  const result = !error ? firstRow(data) : null;
+  const state = safeState(result?.outcome);
+  if (!result || state !== 'connected') {
+    if (state === 'rate_limited') return send(res, 429, { state });
+    if (state === 'scope_required') return send(res, 403, { state });
+    if (state === 'calendar_not_connected') return send(res, 409, { state });
+    return send(res, 401, { state: 'invalid' });
+  }
+  const refreshToken = decryptCalendarToken(result.token_ciphertext, result.token_iv, result.token_tag);
+  const accessToken = refreshToken ? await calendarAccessToken(refreshToken) : null;
+  if (!accessToken) return send(res, 502, { state: 'calendar_reconnect_required' });
+
+  const query = new URLSearchParams({
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '50',
+    fields: 'items(id,summary,start,end,location,status)',
+  });
+  const googleResponse = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${query}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!googleResponse.ok) return send(res, 502, { state: 'calendar_unavailable' });
+  const google = await googleResponse.json() as Record<string, unknown>;
+  const rawItems = Array.isArray(google.items) ? google.items : [];
+  const now = new Date();
+  const items = rawItems
+    .filter((item) => (item as Record<string, unknown>)?.status !== 'cancelled')
+    .map((item) => normalizeCalendarEvent(item, now))
+    .filter((item): item is LauncherCalendarEvent => Boolean(item));
+  return send(res, 200, { state: 'connected', synchronized_at: now.toISOString(), items });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return send(res, 405, { state: 'invalid' });
   const config = getSupabaseServiceConfig();
   if (config.ok === false) return send(res, 503, { state: 'offline' });
   const client = createClient(config.url, config.serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   }) as unknown as ServiceClient;
+  if (req.method === 'GET' && queryValue(req.query.oauth) === 'google-calendar') {
+    try {
+      return await handleCalendarOAuthCallback(req, res, client);
+    } catch {
+      return res.redirect(302, profileRedirect('error'));
+    }
+  }
+  if (req.method !== 'POST') return send(res, 405, { state: 'invalid' });
   const action = String(bodyOf(req).action ?? '');
   try {
     switch (action) {
@@ -344,6 +514,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'cancel': return await handleCancel(req, res, client);
       case 'device-status': return await handleDeviceStatus(req, res, client, config.serviceKey);
       case 'quick-pastes': return await handleQuickPastes(req, res, client, config.serviceKey);
+      case 'calendar-schedule': return await handleCalendarSchedule(req, res, client, config.serviceKey);
+      case 'calendar-status':
+      case 'calendar-connect':
+      case 'calendar-disconnect': return await handleCalendarAccount(req, res, client, action);
       case 'disconnect': return await handleDisconnect(req, res, client);
       case 'inspect':
       case 'approve':

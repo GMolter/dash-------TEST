@@ -13,6 +13,7 @@ DllCall("SetProcessDpiAwarenessContext", "ptr", -4, "ptr")
 #Include ..\src\TileRenderer.ahk
 #Include ..\src\ClipboardRenderer.ahk
 #Include ..\src\QuickPastesRenderer.ahk
+#Include ..\src\CalendarRenderer.ahk
 #Include ..\src\ClipboardPreviewWindow.ahk
 #Include ..\src\SettingsDialog.ahk
 #Include ..\src\LauncherWindow.ahk

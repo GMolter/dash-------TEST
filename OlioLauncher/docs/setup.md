@@ -50,7 +50,8 @@ On the Clipboard History page:
 - Delete removes the selected card.
 - Clear all always asks for confirmation, with No selected by default.
 
-Send to Phone and Network Analyzer are disabled controls. Dynamic Screenshot is active.
+Calendar replaces Send to Phone and shows the rest of today's Google Calendar schedule.
+Network Analyzer remains disabled. Dynamic Screenshot is active.
 Secure account connection and read-only Quick Pastes are available. Quick Paste creation,
 editing, deletion, reordering, and other management remain in Workstation.
 
@@ -75,6 +76,21 @@ Profile Settings provides a separate confirmed revoke action.
 Existing devices approved before the Milestone 6 migration retain only
 `connection:status`; they are not silently broadened. If Quick Pastes reports that a new
 approval is required, disconnect and approve that launcher again.
+
+## Google Calendar
+
+1. In Olio Workstation, open **Profile Settings**, find **Google Calendar**, and choose
+   **Connect calendar**. Google asks only for read-only Calendar access.
+2. Open the launcher's **Calendar** tile. It loads ongoing and upcoming events through
+   the end of the local day; event times are displayed in the Windows local time zone.
+3. Use **Refresh** on the Calendar page for an immediate update. The Account page in
+   launcher **Settings** also has **Refresh schedule** for the same manual action.
+
+The launcher refreshes quietly about 15 seconds after startup and every two hours after
+that. Only the current day's bounded event view is cached locally. The cache is protected
+with Windows DPAPI for the current Windows user, tied to the launcher device ID, replaced
+after successful refresh, and removed when it is stale or the account/calendar is
+disconnected. A network failure leaves a valid current-day cache visible.
 
 ## Quick Pastes
 
@@ -140,11 +156,10 @@ Settings are read from:
 
 The folder is created only after a setting must be written. Choose **Settings** on the
 launcher home screen to open the standalone native Settings window directly. General,
-Clipboard & paste, and Account are compact primary tabs. Less frequently changed monitor,
-position, width, always-on-top, diagnostics, executable-exclusion, and reset controls are
-available from the **•••** overflow menu under **Advanced settings**. Choices save
+Behavior, Clipboard, Appearance, Account, and Advanced are always available in the
+persistent sidebar. Choices save
 immediately. Text fields validate and save after a short pause in typing. **Saved**
-appears at the bottom after a successful change; there is no separate Save button.
+appears quietly at the top right after a successful change; there is no separate Save button.
 Hover a setting, its label, or its control for a description; help does not require a
 separate question-mark button. Start from
 `config/settings.example.json` only when an isolated source-build fixture needs a manual
@@ -155,8 +170,8 @@ file. Supported values and safe defaults are:
 | Focus Key | usable, non-reserved AutoHotkey v2 hotkey | `#+F23` |
 | Start with Windows | on/off | off |
 | Opening monitor | Active, Primary, Remembered | Active |
-| Opening position | Right edge, Remembered | Right edge |
-| Panel width | 280–640 logical pixels | 360 |
+| Opening position | Upper right, Middle right | Middle right |
+| Launcher scale | Compact (90%), Standard (100%), Large (115%) | Standard |
 | Always on top | on/off | on |
 | Hide the launcher when I click elsewhere | on/off | on |
 | Close after choosing an item | on/off | off |
@@ -164,16 +179,17 @@ file. Supported values and safe defaults are:
 | Clipboard History capture | active/paused | active |
 | Apps ignored by Clipboard History | up to 32 semicolon-separated `.exe` names | `KeePass.exe;KeePassXC.exe;1Password.exe;Bitwarden.exe` |
 | Theme | Follow Windows, Dark, Light | Follow Windows |
-| Reduced motion | on/off | off |
 | Redacted diagnostics | on/off | off |
 | Olio account | Connect, Cancel, Retry, Disconnect | disconnected on a new device |
 
 Internal non-sensitive fields include `settingsSchemaVersion` (currently 2),
 `lastSelected`, remembered monitor name/coordinates, the stable device UUID, safe device
-name, and connection display timestamps. Quick Paste rows, synchronization timestamps,
-clipboard data, pixels, credentials, tokens, email, and account identity are absent.
+name, and connection display timestamps. Quick Paste rows, calendar events, synchronization
+timestamps, clipboard data, pixels, credentials, tokens, email, and account identity are absent.
 
 Quick Paste data and synchronization timestamps are deliberately absent from this file.
+The separate `%LOCALAPPDATA%\OlioLauncher\calendar-cache.bin` contains only a DPAPI-encrypted
+current-day Calendar cache; it is not JSON and cannot be read by another Windows user.
 
 The production Workstation origin is built in as `https://olio.one`; users do not enter
 or store an API address. Isolated protocol tests may inject a non-production HTTPS origin
@@ -197,19 +213,19 @@ revoke and remove the connection, use the separate **Disconnect Olio Account** a
 confirm it. Reset never invokes disconnect, and disconnect never runs as a side effect of
 reset.
 
-### Monitor, position, width, and scaling
+### Monitor, position, and scaling
 
 - **Active monitor** follows the application that was active immediately before opening.
 - **Primary monitor** uses the Windows primary work area.
 - **Remembered monitor** reuses the last dragged monitor. If it was removed, the nearest
   usable work area is selected.
-- **Right edge** attaches to `rcWork`, respecting the taskbar.
-- **Remembered position** reuses the last header-drag position and clamps it into the
-  selected work area.
+- **Upper right** and **Middle right** attach to `rcWork`, respecting the taskbar while
+  keeping the launcher away from the center of the workspace.
 - Negative virtual coordinates are valid. Removed monitors, invalid/off-screen
-  coordinates, taskbar changes, width changes, and DPI changes are recovered by clamping,
+  coordinates, taskbar changes, scale changes, and DPI changes are recovered by clamping,
   not by assuming coordinate zero.
-- Panel width is stored in logical pixels and scaled for 100%, 125%, and 150% DPI. The
+- Compact, Standard, and Large scale the whole launcher layout. A compatible numeric
+  width remains in schema version 2 for older builds. The
   standalone Settings window acquires its target monitor before sizing so its window and
   controls scale together through Per-Monitor V2 behavior.
 
@@ -232,12 +248,11 @@ managers and other apps containing private text. Entries match only validated ex
 file names, case-insensitively, when Windows exposes a clipboard owner. They do not block
 pasting into those apps. Neither the executable name nor content enters diagnostics.
 
-### Theme, motion, and keyboard access
+### Theme and keyboard access
 
 Follow Windows resolves light/dark and automatically uses Windows high-contrast system
 colors. Owner-drawn controls, cards, previews, disabled states, status text, and visible
-focus share the resolved palette. Reduced motion removes nonessential hover transitions
-without disabling any action.
+focus share the resolved palette. Motion is always minimized without disabling any action.
 
 Use Tab and Shift+Tab through Settings, arrows within selection controls and launcher
 navigation, Enter or Space to activate the expected control/item, and Escape to close the

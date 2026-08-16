@@ -12,6 +12,7 @@ import {
 import { User, LogOut, Building2, AlertTriangle, ExternalLink, Palette, X } from 'lucide-react';
 import { AnimatedBackground } from '../components/AnimatedBackground';
 import { LauncherDevices } from '../components/LauncherDevices';
+import { GoogleCalendarConnection } from '../components/GoogleCalendarConnection';
 
 type ProfileSettingsProps = {
   appBackgroundTheme: AppBackgroundTheme;
@@ -207,6 +208,8 @@ export function ProfileSettings({
             </div>
           </div>
         )}
+
+        <GoogleCalendarConnection />
 
         <LauncherDevices />
 

@@ -17,6 +17,7 @@ DllCall("SetProcessDpiAwarenessContext", "ptr", -4, "ptr")
 #Include ..\src\TileRenderer.ahk
 #Include ..\src\ClipboardRenderer.ahk
 #Include ..\src\QuickPastesRenderer.ahk
+#Include ..\src\CalendarRenderer.ahk
 #Include ..\src\ClipboardPreviewWindow.ahk
 #Include ..\src\SettingsDialog.ahk
 #Include ..\src\LauncherWindow.ahk
@@ -435,9 +436,9 @@ class Milestone6Tests {
                 && !window.QuickCopyButton.Enabled
                 && !window.QuickPasteButton.Enabled,
                 "Disconnected state lacks a Settings route or exposes content actions.")
-            this.Assert(!window.Buttons["sendToPhone"].Enabled
+            this.Assert(window.Buttons["calendar"].Enabled
                 && !window.Buttons["networkAnalyzer"].Enabled,
-                "A deferred feature became active.")
+                "Calendar or deferred Network tile state is incorrect.")
         } finally {
             client.ChangedCallback := 0
             try window.Gui.Destroy()

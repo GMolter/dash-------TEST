@@ -27,8 +27,8 @@ When a remembered display is removed, the nearest usable work area is selected.
 Remembered coordinates, width, and height are clamped inside the current taskbar-aware
 work area after monitor, docking, DPI, and taskbar changes.
 
-Choose Right edge to discard the visible effect of a stale remembered coordinate. A
-settings reset also restores Active monitor, Right edge, and 360-pixel width while
+Choose Middle right to discard the visible effect of a stale remembered coordinate. A
+settings reset also restores Active monitor, Middle right, and Standard scale while
 preserving the Olio account connection.
 
 ## Close-after-selection or automatic paste is surprising
@@ -51,8 +51,7 @@ Use Follow Windows for normal light/dark and automatic high-contrast behavior. D
 Light override only the regular color preference; active Windows high contrast still
 wins. Visible focus uses a two-pixel DPI-scaled outline, and disabled controls retain a
 native disabled state plus distinct colors. The custom-drawn switches keep native button
-semantics. Reduced motion suppresses nonessential hover transitions without disabling
-controls.
+semantics. Motion is permanently minimized without disabling controls.
 
 At 100%, 125%, and 150% Windows scaling, close and reopen the panel after a display change
 so it re-resolves the work area and DPI. Real mixed-DPI hardware should still be checked

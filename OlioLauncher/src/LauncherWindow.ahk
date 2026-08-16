@@ -1,6 +1,7 @@
 class LauncherWindow {
     __New(settings, navigateCallback, visualTestMode := false, clipboardManager := 0,
-        connectionManager := 0, quickPastesManager := 0, settingsApplyCallback := 0) {
+        connectionManager := 0, quickPastesManager := 0, settingsApplyCallback := 0,
+        calendarManager := 0) {
         this.Settings := settings
         this.NavigateCallback := navigateCallback
         this.SettingsApplyCallback := settingsApplyCallback
@@ -8,6 +9,8 @@ class LauncherWindow {
         this.ClipboardManager := clipboardManager
         this.ConnectionManager := connectionManager
         this.QuickPastesManager := quickPastesManager
+        this.CalendarManager := calendarManager
+        this.CalendarVisibleItems := []
         this.QuickVisibleItems := []
         this.QuickLastFeedback := ""
         this.QuickWheelRemainder := 0
@@ -21,7 +24,10 @@ class LauncherWindow {
         this.ButtonKeysByHwnd := Map()
         this.HomeControls := []
         this.PageKey := ""
-        this.DesiredLogicalHeight := 286
+        this.LauncherScale := settings.Has("launcherScale")
+            ? settings["launcherScale"] : "standard"
+        this.ScaleFactor := LauncherWindow.ScaleFactorFor(this.LauncherScale)
+        this.DesiredLogicalHeight := Round(286 * this.ScaleFactor)
         this.HasVisibleStatus := false
         this.AutoCloseOnDeactivate := settings["closeOnFocusLost"] && !visualTestMode
         this.PreviewWindow := 0
@@ -30,7 +36,7 @@ class LauncherWindow {
         this.DirectScreenshotActive := false
         this.DirectScreenshotPriorAutoClose := this.AutoCloseOnDeactivate
         this.SettingsDialog := 0
-        this.LogicalWidth := settings["panelWidth"]
+        this.LogicalWidth := SettingsManager.PanelWidthForScale(this.LauncherScale)
         ThemeManager.Configure(settings)
 
         options := "-Caption +Border"
@@ -39,10 +45,9 @@ class LauncherWindow {
         if settings["alwaysOnTop"]
             options .= " +AlwaysOnTop"
         this.Gui := Gui(options, "Olio Launcher")
-        this.Gui.BackColor := ThemeManager.Hex("Window")
+        this.Gui.BackColor := ThemeManager.Hex("LauncherWindow")
         this.Gui.MarginX := 16
         this.Gui.MarginY := 14
-        this.ApplyWorkstationWindowStyle()
 
         logoOptions := "x16 y10 w40 h40"
         if A_IsCompiled
@@ -50,25 +55,24 @@ class LauncherWindow {
         this.Logo := this.Gui.AddPicture(logoOptions, LauncherWindow.BrandIconPath())
 
         ; The logo carries the Olio brand; the adjacent label names this app.
-        this.Gui.SetFont("s11 bold c818CF8", "Segoe UI Variable Text")
-        this.Wordmark := this.Gui.AddText("x62 y18 w150 h28 +0x200", "Launcher")
+        this.Gui.SetFont("s10 bold cF8FAFC", "Segoe UI Variable Text")
+        this.Wordmark := this.Gui.AddText("x58 y16 w150 h28 +0x200", "Olio Launcher")
 
         settingsButton := this.Gui.Add("Custom", "ClassButton x232 y14 w112 h36 0x5401000B", "Settings")
         this.Buttons["settings"] := settingsButton
         this.ButtonKeysByHwnd[settingsButton.Hwnd] := "settings"
-        TileRenderer.RegisterSettingsButton(settingsButton, 0xFBBF24)
+        TileRenderer.RegisterSettingsButton(settingsButton, 0xA78BFA)
         this.HomeControls.Push(settingsButton)
         this.Gui.SetFont("s9 bold cF8FAFC", "Segoe UI Variable Text")
         this.SettingsLabel := this.Gui.AddText(
-            "x272 y16 w62 h32 +0x200 +0x100 Background0B1220", "Settings")
+            "x272 y16 w62 h32 +0x200 +0x100 Background0B1220 Hidden", "Settings")
         this.SettingsLabel.OnEvent("Click", (*) => this.OpenPreferences())
-        this.HomeControls.Push(this.SettingsLabel)
 
         definitions := [
             {Key: "clipboard", Accessible: "Clipboard History", Title: "Clipboard", Subtitle: "", Accent: 0x38BDF8, X: 16, Y: 64, W: 160, H: 64, Enabled: true},
             {Key: "screenshot", Accessible: "Dynamic Screenshot", Title: "Screenshot", Subtitle: "", Accent: 0x8B5CF6, X: 184, Y: 64, W: 160, H: 64, Enabled: true},
             {Key: "quickPastes", Accessible: "Quick Pastes", Title: "Quick Pastes", Subtitle: "", Accent: 0x34D399, X: 16, Y: 136, W: 328, H: 64, Enabled: true},
-            {Key: "sendToPhone", Accessible: "Send to Phone — Planning", Title: "Send to Phone", Subtitle: "Planning", Accent: 0xF59E0B, X: 16, Y: 208, W: 160, H: 56, Enabled: false},
+            {Key: "calendar", Accessible: "Today's Google Calendar schedule", Title: "Calendar", Subtitle: "Today", Accent: 0xF59E0B, X: 16, Y: 208, W: 160, H: 56, Enabled: true},
             {Key: "networkAnalyzer", Accessible: "Network Analyzer — Coming later", Title: "Network", Subtitle: "Later", Accent: 0x64748B, X: 184, Y: 208, W: 160, H: 56, Enabled: false}
         ]
 
@@ -88,13 +92,14 @@ class LauncherWindow {
         this.PageDefinitions := Map(
             "clipboard", {Title: "Clipboard History", Subtitle: "History will appear here.", Accent: 0x38BDF8},
             "screenshot", {Title: "Dynamic Screenshot", Subtitle: "Drag to select an area.", Accent: 0x8B5CF6},
-            "quickPastes", {Title: "Quick Pastes", Subtitle: "Launcher access begins in Milestone 6.", Accent: 0x34D399}
+            "quickPastes", {Title: "Quick Pastes", Subtitle: "Launcher access begins in Milestone 6.", Accent: 0x34D399},
+            "calendar", {Title: "Today's Schedule", Subtitle: "The rest of your day.", Accent: 0xF59E0B}
         )
         this.BackButton := this.Gui.Add("Custom",
             "ClassButton x232 y14 w112 h36 Hidden 0x5401000B", "Back to tools")
         this.ButtonKeysByHwnd[this.BackButton.Hwnd] := "__back"
         TileRenderer.RegisterUtilityButton(this.BackButton, "Back", "arrow-left",
-            0x818CF8, true, false)
+            0x818CF8, true, true)
         this.Gui.SetFont("s9 bold cF8FAFC", "Segoe UI Variable Text")
         this.BackLabel := this.Gui.AddText(
             "x272 y16 w62 h32 +0x200 +0x100 Background0B1220 Hidden", "Back")
@@ -104,10 +109,11 @@ class LauncherWindow {
         this.PageTitle := this.Gui.AddText("x16 y62 w328 h34 +0x200 Hidden", "")
         this.Gui.SetFont("s10 c94A3B8", "Segoe UI Variable Text")
         this.PageSubtitle := this.Gui.AddText("x16 y124 w328 h60 +Wrap Hidden", "")
-        this.PageControls := [this.BackButton, this.BackLabel, this.PageTitle, this.PageSubtitle]
+        this.PageControls := [this.BackButton, this.PageTitle, this.PageSubtitle]
         this.CreateClipboardControls()
         this.CreateConnectionControls()
         this.CreateQuickPastesControls()
+        this.CreateCalendarControls()
 
         this.Gui.SetFont("s8 cFCA5A5", "Segoe UI Variable Text")
         this.StatusText := this.Gui.AddText("x16 y278 w328 h28 +Wrap Hidden", "")
@@ -172,7 +178,7 @@ class LauncherWindow {
         OnMessage(0x020A, this.QuickWheelHandler) ; WM_MOUSEWHEEL
         OnMessage(0x0201, this.HeaderMouseHandler) ; WM_LBUTTONDOWN
         OnMessage(0x0232, this.ExitSizeMoveHandler) ; WM_EXITSIZEMOVE
-        this.LayoutForPanelWidth(this.LogicalWidth)
+        this.LayoutForLauncherScale(this.LauncherScale)
         this.ApplyTheme()
     }
 
@@ -303,95 +309,150 @@ class LauncherWindow {
         return button
     }
 
+    CreateCalendarControls() {
+        this.CalendarControls := []
+        this.Gui.SetFont("s9 c94A3B8", "Segoe UI Variable Text")
+        this.CalendarStatus := this.Gui.AddText(
+            "x16 y102 w328 h28 +0x200 Hidden", "Ready to load today's schedule.")
+        this.CalendarControls.Push(this.CalendarStatus)
+
+        this.CalendarRefreshButton := this.AddCalendarButton(
+            "x238 y62 w106 h34 Hidden", "Refresh", 0xF59E0B)
+        this.ButtonKeysByHwnd[this.CalendarRefreshButton.Hwnd] := "__calendar_refresh"
+
+        this.Gui.SetFont("s9 cE2E8F0", "Segoe UI Variable Text")
+        this.CalendarList := this.Gui.Add("Custom",
+            "ClassListBox x16 y136 w328 h278 Hidden Background020617 cE2E8F0 0x50211051")
+        CalendarRenderer.Register(this.CalendarList, this)
+        this.CalendarControls.Push(this.CalendarList)
+
+        this.Gui.SetFont("s8 c94A3B8", "Segoe UI Variable Text")
+        this.CalendarFooter := this.Gui.AddText(
+            "x16 y416 w328 h18 +0x200 Hidden", "Not updated yet")
+        this.CalendarControls.Push(this.CalendarFooter)
+
+        this.CalendarConnectButton := this.AddCalendarButton(
+            "x16 y438 w328 h42 Hidden", "Open Calendar Settings", 0x38BDF8)
+        this.ButtonKeysByHwnd[this.CalendarConnectButton.Hwnd] := "__calendar_settings"
+    }
+
+    AddCalendarButton(options, title, accent) {
+        button := this.Gui.Add("Custom", "ClassButton " options " 0x5001000B", title)
+        TileRenderer.Register(button, title, "", accent, true)
+        this.CalendarControls.Push(button)
+        return button
+    }
+
     ApplyWorkstationWindowStyle() {
         try {
             cornerPreference := 2 ; DWMWCP_ROUND
             DllCall("dwmapi\DwmSetWindowAttribute", "ptr", this.Gui.Hwnd, "uint", 33,
                 "int*", &cornerPreference, "uint", 4)
-            borderColor := TileRenderer.ColorRef(0x1E293B)
+            borderColor := TileRenderer.ColorRef(
+                ThemeManager.Color("LauncherBorder", 0x263750))
             DllCall("dwmapi\DwmSetWindowAttribute", "ptr", this.Gui.Hwnd, "uint", 34,
                 "uint*", &borderColor, "uint", 4)
         }
     }
 
-    LayoutForPanelWidth(logicalWidth) {
-        logicalWidth := Max(SettingsManager.MinimumPanelWidth,
-            Min(SettingsManager.MaximumPanelWidth, logicalWidth))
+    static ScaleFactorFor(scale) {
+        return scale = "compact" ? 0.90 : scale = "large" ? 1.15 : 1.0
+    }
+
+    LayoutForLauncherScale(scale) {
+        this.LauncherScale := scale
+        this.ScaleFactor := LauncherWindow.ScaleFactorFor(scale)
+        metric(value) => Round(value * this.ScaleFactor)
+        logicalWidth := SettingsManager.PanelWidthForScale(scale)
         this.LogicalWidth := logicalWidth
-        inner := logicalWidth - 32
-        columnWidth := Floor((inner - 8) / 2)
-        rightColumn := 24 + columnWidth
-        utilityX := logicalWidth - 128
-        this.Wordmark.Move(62, 18, Max(60, utilityX - 70), 28)
-        this.Buttons["settings"].Move(utilityX, 14, 112, 36)
-        this.SettingsLabel.Move(utilityX + 40, 16, 62, 32)
-        this.Buttons["clipboard"].Move(16, 64, columnWidth, 64)
-        this.Buttons["screenshot"].Move(rightColumn, 64, columnWidth, 64)
-        this.Buttons["quickPastes"].Move(16, 136, inner, 64)
-        this.Buttons["sendToPhone"].Move(16, 208, columnWidth, 56)
-        this.Buttons["networkAnalyzer"].Move(rightColumn, 208, columnWidth, 56)
-        this.BackButton.Move(utilityX, 14, 112, 36)
-        this.BackLabel.Move(utilityX + 40, 16, 62, 32)
-        this.PageTitle.Move(16, 62, inner, 34)
-        this.PageSubtitle.Move(16, 124, inner, 60)
-        this.StatusText.Move(16, 278, inner, 28)
+        this.DesiredLogicalHeight := metric(286)
+        inner := metric(328)
+        columnWidth := metric(160)
+        rightColumn := metric(184)
+        utilityX := logicalWidth - metric(128)
+        this.Logo.Move(metric(16), metric(10), metric(40), metric(40))
+        this.Wordmark.Move(metric(58), metric(16), Max(metric(60),
+            utilityX - metric(66)), metric(28))
+        this.Buttons["settings"].Move(utilityX, metric(14), metric(112), metric(36))
+        this.SettingsLabel.Move(utilityX + metric(40), metric(16), metric(62), metric(32))
+        this.Buttons["clipboard"].Move(metric(16), metric(64), columnWidth, metric(64))
+        this.Buttons["screenshot"].Move(rightColumn, metric(64), columnWidth, metric(64))
+        this.Buttons["quickPastes"].Move(metric(16), metric(136), inner, metric(64))
+        this.Buttons["calendar"].Move(metric(16), metric(208), columnWidth, metric(56))
+        this.Buttons["networkAnalyzer"].Move(rightColumn, metric(208), columnWidth, metric(56))
+        this.BackButton.Move(utilityX, metric(14), metric(112), metric(36))
+        this.BackLabel.Move(utilityX + metric(40), metric(16), metric(62), metric(32))
+        this.PageTitle.Move(metric(16), metric(62), inner, metric(34))
+        this.PageSubtitle.Move(metric(16), metric(124), inner, metric(60))
+        this.StatusText.Move(metric(16), metric(278), inner, metric(28))
 
-        this.ClipboardStatus.Move(16, 102, inner, 28)
-        this.ClipboardClearButton.Move(logicalWidth - 122, 62, 106, 34)
-        this.ClipboardList.Move(16, 130, inner, 290)
-        this.ClipboardOpenButton.Move(logicalWidth - 232, 438, 104, 42)
-        this.ClipboardDeleteButton.Move(logicalWidth - 120, 438, 104, 42)
+        this.ClipboardStatus.Move(metric(16), metric(102), inner, metric(28))
+        this.ClipboardClearButton.Move(logicalWidth - metric(122), metric(62), metric(106), metric(34))
+        this.ClipboardList.Move(metric(16), metric(130), inner, metric(290))
+        this.ClipboardOpenButton.Move(logicalWidth - metric(232), metric(438), metric(104), metric(42))
+        this.ClipboardDeleteButton.Move(logicalWidth - metric(120), metric(438), metric(104), metric(42))
 
-        this.PreferencesButton.Move(16, 104, inner, 38)
-        this.ConnectionNameLabel.Move(16, 154, inner, 22)
-        this.ConnectionNameEdit.Move(16, 176, inner, 30)
-        this.ConnectionStatus.Move(16, 216, inner, 80)
+        this.PreferencesButton.Move(metric(16), metric(104), inner, metric(38))
+        this.ConnectionNameLabel.Move(metric(16), metric(154), inner, metric(22))
+        this.ConnectionNameEdit.Move(metric(16), metric(176), inner, metric(30))
+        this.ConnectionStatus.Move(metric(16), metric(216), inner, metric(80))
         for button in [this.ConnectionConnectButton, this.ConnectionCancelButton,
             this.ConnectionDisconnectButton]
-            button.Move(16, 308, inner, 42)
-        this.ConnectionRetryButton.Move(16, 308, Floor((inner - 8) / 2), 42)
+            button.Move(metric(16), metric(308), inner, metric(42))
+        this.ConnectionRetryButton.Move(metric(16), metric(308),
+            Floor((inner - metric(8)) / 2), metric(42))
 
-        this.QuickStatus.Move(16, 102, inner, 28)
-        this.QuickRefreshButton.Move(logicalWidth - 122, 62, 106, 34)
-        this.QuickSearchLabel.Move(16, 132, inner, 16)
-        this.QuickSearchEdit.Move(16, 148, inner, 30)
-        this.QuickPasteList.Move(16, 184, inner, 230)
-        this.QuickFooter.Move(16, 416, inner, 18)
-        this.QuickCopyButton.Move(logicalWidth - 232, 438, 104, 42)
-        this.QuickPasteButton.Move(logicalWidth - 120, 438, 104, 42)
-        this.QuickSettingsButton.Move(16, 438, inner, 42)
+        this.QuickStatus.Move(metric(16), metric(102), inner, metric(28))
+        this.QuickRefreshButton.Move(logicalWidth - metric(122), metric(62), metric(106), metric(34))
+        this.QuickSearchLabel.Move(metric(16), metric(132), inner, metric(16))
+        this.QuickSearchEdit.Move(metric(16), metric(148), inner, metric(30))
+        this.QuickPasteList.Move(metric(16), metric(184), inner, metric(230))
+        this.QuickFooter.Move(metric(16), metric(416), inner, metric(18))
+        this.QuickCopyButton.Move(logicalWidth - metric(232), metric(438), metric(104), metric(42))
+        this.QuickPasteButton.Move(logicalWidth - metric(120), metric(438), metric(104), metric(42))
+        this.QuickSettingsButton.Move(metric(16), metric(438), inner, metric(42))
+
+        this.CalendarStatus.Move(metric(16), metric(102), inner, metric(28))
+        this.CalendarRefreshButton.Move(logicalWidth - metric(122), metric(62), metric(106), metric(34))
+        this.CalendarList.Move(metric(16), metric(136), inner, metric(278))
+        this.CalendarFooter.Move(metric(16), metric(416), inner, metric(18))
+        this.CalendarConnectButton.Move(metric(16), metric(438), inner, metric(42))
     }
 
     ApplyTheme() {
         ThemeManager.Configure(this.Settings)
-        this.Gui.BackColor := ThemeManager.Hex("Window")
+        this.Gui.BackColor := ThemeManager.Hex("LauncherWindow")
+        this.ApplyWorkstationWindowStyle()
         for control in [this.Wordmark, this.SettingsLabel, this.BackLabel,
             this.PageTitle]
             control.SetFont("c" ThemeManager.Hex("Text"),
                 "Segoe UI Variable Text")
         for control in [this.PageSubtitle, this.ClipboardStatus,
             this.ConnectionNameLabel, this.ConnectionStatus, this.QuickStatus,
-            this.QuickSearchLabel, this.QuickFooter]
+            this.QuickSearchLabel, this.QuickFooter, this.CalendarStatus,
+            this.CalendarFooter]
             control.SetFont("c" ThemeManager.Hex("MutedText"),
                 "Segoe UI Variable Text")
         this.StatusText.SetFont("c" ThemeManager.Hex("ErrorText"),
             "Segoe UI Variable Text")
         for control in [this.ConnectionNameEdit, this.QuickSearchEdit] {
-            try control.Opt("Background" ThemeManager.Hex("Input")
+            try control.Opt("Background" ThemeManager.Hex("LauncherInput")
                 " c" ThemeManager.Hex("Text"))
         }
         for control in [this.SettingsLabel, this.BackLabel] {
-            try control.Opt("Background" ThemeManager.Hex("Surface")
+            try control.Opt("Background" ThemeManager.Hex("LauncherSurface")
                 " c" ThemeManager.Hex("Text"))
         }
-        for control in [this.ClipboardList, this.QuickPasteList] {
-            try control.Opt("Background" ThemeManager.Hex("Window")
+        for control in [this.ClipboardList, this.QuickPasteList, this.CalendarList] {
+            try control.Opt("Background" ThemeManager.Hex("LauncherWindow")
                 " c" ThemeManager.Hex("Text"))
         }
         TileRenderer.RefreshAll()
         try DllCall("InvalidateRect", "ptr", this.ClipboardList.Hwnd,
             "ptr", 0, "int", true)
         try DllCall("InvalidateRect", "ptr", this.QuickPasteList.Hwnd,
+            "ptr", 0, "int", true)
+        try DllCall("InvalidateRect", "ptr", this.CalendarList.Hwnd,
             "ptr", 0, "int", true)
     }
 
@@ -437,6 +498,7 @@ class LauncherWindow {
     IsNavigationContext() {
         if !WinActive("ahk_id " this.Gui.Hwnd)
             || this.PageKey = "clipboard" || this.PageKey = "quickPastes"
+            || this.PageKey = "calendar"
             return false
         focused := DllCall("GetFocus", "ptr")
         if !focused
@@ -461,6 +523,14 @@ class LauncherWindow {
         return candidates[1]
     }
 
+    static SafeWorkstationOrigin(value) {
+        value := Trim(String(value), " `t`r`n/")
+        if !RegExMatch(value,
+            "i)^https://([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+)(?::([0-9]{1,5}))?$", &match)
+            return ""
+        return "https://" StrLower(match[1]) (match[2] ? ":" match[2] : "")
+    }
+
     static ShouldRestoreFocus(currentForeground, launcherHwnd) {
         return currentForeground && WindowsInterop.RootWindow(currentForeground) = launcherHwnd
     }
@@ -471,10 +541,7 @@ class LauncherWindow {
         foreground := DllCall("GetForegroundWindow", "ptr")
         if foreground != this.Gui.Hwnd
             this.PreviousForeground := foreground
-        requestedHeight := this.PageKey = "clipboard" ? 500
-            : this.PageKey = "quickPastes" ? 500
-            : this.PageKey = "settings" ? 400
-            : (this.HasVisibleStatus ? 318 : this.DesiredLogicalHeight)
+        requestedHeight := this.CurrentLogicalHeight()
         geometry := this.OpeningGeometry(requestedHeight, foreground)
         this.Gui.Show("x" geometry.X " y" geometry.Y " w" geometry.Width
             " h" geometry.Height)
@@ -576,6 +643,8 @@ class LauncherWindow {
             control.Visible := false
         for control in this.QuickPastesControls
             control.Visible := false
+        for control in this.CalendarControls
+            control.Visible := false
         this.PageKey := key
         if key = "clipboard" {
             this.PageSubtitle.Visible := false
@@ -609,6 +678,19 @@ class LauncherWindow {
                 this.QuickSettingsButton.Focus()
             else
                 this.QuickPasteList.Focus()
+        } else if key = "calendar" {
+            this.PageSubtitle.Visible := false
+            for control in this.CalendarControls
+                control.Visible := true
+            if IsObject(this.CalendarManager)
+                this.CalendarManager.Refresh()
+            this.RefreshCalendar()
+            if this.CalendarVisibleItems.Length
+                this.CalendarList.Focus()
+            else if this.CalendarRefreshButton.Enabled
+                this.CalendarRefreshButton.Focus()
+            else
+                this.CalendarConnectButton.Focus()
         } else {
             this.Navigation.Controls := [this.BackButton]
             this.BackButton.Focus()
@@ -628,6 +710,8 @@ class LauncherWindow {
             control.Visible := false
         for control in this.QuickPastesControls
             control.Visible := false
+        for control in this.CalendarControls
+            control.Visible := false
         for control in this.PageControls
             control.Visible := false
         for control in this.HomeControls
@@ -646,10 +730,7 @@ class LauncherWindow {
     ResizeForCurrentView() {
         if !this.IsVisible()
             return
-        logicalHeight := this.PageKey = "clipboard" ? 500
-            : this.PageKey = "quickPastes" ? 500
-            : this.PageKey = "settings" ? 400
-            : (this.HasVisibleStatus ? 318 : this.DesiredLogicalHeight)
+        logicalHeight := this.CurrentLogicalHeight()
         geometry := this.OpeningGeometry(logicalHeight, this.PreviousForeground)
         this.Gui.Show("x" geometry.X " y" geometry.Y " w" geometry.Width
             " h" geometry.Height)
@@ -663,16 +744,22 @@ class LauncherWindow {
             this.Settings["rememberedMonitor"], this.Settings["rememberedX"],
             this.Settings["rememberedY"],
             this.Settings["rememberedPositionValid"])
-        width := Round(this.Settings["panelWidth"] * area.Dpi / 96)
+        width := Round(this.LogicalWidth * area.Dpi / 96)
         height := Min(logicalHeight, area.Bottom - area.Top)
-        x := this.Settings["openingPosition"] = "remembered"
-            && this.Settings["rememberedPositionValid"]
-            ? this.Settings["rememberedX"] : area.Right - width
-        y := this.Settings["openingPosition"] = "remembered"
-            && this.Settings["rememberedPositionValid"]
-            ? this.Settings["rememberedY"]
-            : LauncherWindow.CenteredY(area.Top, area.Bottom, height)
+        coordinates := WindowsInterop.OpeningCoordinates(area, width, height,
+            this.Settings["openingPosition"], this.Settings["rememberedX"],
+            this.Settings["rememberedY"], this.Settings["rememberedPositionValid"])
+        x := coordinates.X, y := coordinates.Y
         return WindowsInterop.ClampWindowPosition(area, x, y, width, height)
+    }
+
+    CurrentLogicalHeight() {
+        baseHeight := this.PageKey = "clipboard" ? 500
+            : this.PageKey = "quickPastes" ? 500
+            : this.PageKey = "calendar" ? 500
+            : this.PageKey = "settings" ? 400
+            : (this.HasVisibleStatus ? 318 : 286)
+        return Round(baseHeight * this.ScaleFactor)
     }
 
     OnClipboardHistoryChanged(status) {
@@ -1075,6 +1162,83 @@ class LauncherWindow {
         }
     }
 
+    OnCalendarChanged(state, detail) {
+        if IsObject(this.SettingsDialog) && this.SettingsDialog.IsVisible()
+            this.SettingsDialog.OnCalendarChanged(state, detail)
+        if this.PageKey = "calendar" {
+            focused := DllCall("GetFocus", "ptr")
+            this.RefreshCalendar()
+            if state = "ready" && this.CalendarVisibleItems.Length
+                && (!focused || focused = this.CalendarRefreshButton.Hwnd)
+                this.CalendarList.Focus()
+        }
+    }
+
+    RefreshCalendar() {
+        manager := this.CalendarManager
+        this.CalendarStatus.Text := IsObject(manager) ? manager.Detail
+            : "Calendar synchronization is unavailable in this isolated mode."
+        this.CalendarVisibleItems := IsObject(manager) ? manager.RemainingItems() : []
+        DllCall("SendMessageW", "ptr", this.CalendarList.Hwnd,
+            "uint", 0x0184, "uptr", 0, "ptr", 0)
+        for item in this.CalendarVisibleItems {
+            accessible := item.TimeText() ", " item.SafeTitle(120)
+            if item.Location
+                accessible .= ", " item.SafeLocation(100)
+            DllCall("SendMessageW", "ptr", this.CalendarList.Hwnd,
+                "uint", 0x0180, "uptr", 0, "str", accessible, "ptr")
+        }
+        if this.CalendarVisibleItems.Length
+            DllCall("SendMessageW", "ptr", this.CalendarList.Hwnd,
+                "uint", 0x0186, "uptr", 0, "ptr", 0)
+        dpi := DllCall("GetDpiForWindow", "ptr", this.Gui.Hwnd, "uint")
+        if !dpi
+            dpi := 96
+        DllCall("SendMessageW", "ptr", this.CalendarList.Hwnd,
+            "uint", 0x01A0, "uptr", 0, "ptr", Round(76 * dpi / 96))
+        DllCall("InvalidateRect", "ptr", this.CalendarList.Hwnd,
+            "ptr", 0, "int", true)
+
+        hasCredential := IsObject(this.ConnectionManager)
+            && this.ConnectionManager.Credential
+        busy := IsObject(manager) && manager.RequestBusy
+        needsSettings := !hasCredential || !IsObject(manager)
+            || manager.State = "disconnected" || manager.State = "revoked"
+            || manager.State = "calendar-not-connected"
+            || manager.State = "scope-required"
+            || manager.State = "calendar-reconnect-required"
+        TileRenderer.SetEnabled(this.CalendarRefreshButton, hasCredential && !busy)
+        TileRenderer.SetEnabled(this.CalendarConnectButton, true)
+        this.CalendarConnectButton.Visible := needsSettings
+        this.CalendarFooter.Text := IsObject(manager)
+            ? manager.LastSyncDisplay() : "Not updated yet"
+        this.Navigation.Controls := [this.BackButton, this.CalendarRefreshButton,
+            this.CalendarList]
+        if needsSettings
+            this.Navigation.Controls.Push(this.CalendarConnectButton)
+        TileRenderer.RefreshAll()
+    }
+
+    RefreshCalendarNow() {
+        if IsObject(this.CalendarManager)
+            this.CalendarManager.Refresh()
+    }
+
+    OpenCalendarSettings() {
+        if !IsObject(this.ConnectionManager)
+            return false
+        origin := LauncherWindow.SafeWorkstationOrigin(this.ConnectionManager.Origin)
+        if !origin
+            return false
+        try {
+            Run(origin "/profile")
+            return true
+        } catch {
+            this.CalendarStatus.Text := "Calendar settings could not be opened."
+            return false
+        }
+    }
+
     OnConnectionChanged(state, detail) {
         if IsObject(this.SettingsDialog) && this.SettingsDialog.IsVisible()
             this.SettingsDialog.OnConnectionChanged(state, detail)
@@ -1145,7 +1309,7 @@ class LauncherWindow {
         try this.SettingsDialog := SettingsDialog(this.Gui, this.Settings,
             (action, changes) => this.ApplySettingsRequest(action, changes),
             (*) => this.OnSettingsDialogClosed(), this.VisualTestMode,
-            this.ConnectionManager)
+            this.ConnectionManager, this.CalendarManager)
         catch {
             this.SettingsDialog := 0
             this.AutoCloseOnDeactivate := previousAutoClose
@@ -1187,7 +1351,7 @@ class LauncherWindow {
         this.AutoCloseOnDeactivate := settings["closeOnFocusLost"]
             && !this.VisualTestMode
         this.Gui.Opt(settings["alwaysOnTop"] ? "+AlwaysOnTop" : "-AlwaysOnTop")
-        this.LayoutForPanelWidth(settings["panelWidth"])
+        this.LayoutForLauncherScale(settings["launcherScale"])
         if IsObject(this.ClipboardManager)
             this.ClipboardManager.ApplySettings(settings)
         this.ApplyTheme()
@@ -1288,6 +1452,8 @@ class LauncherWindow {
                 case "__quick_copy": this.CopyQuickPasteSelection()
                 case "__quick_paste": this.PasteQuickPasteSelection()
                 case "__quick_settings": this.OpenPreferences()
+                case "__calendar_refresh": this.RefreshCalendarNow()
+                case "__calendar_settings": this.OpenCalendarSettings()
                 default:
                     if key = "settings"
                         this.OpenPreferences()

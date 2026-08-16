@@ -92,7 +92,7 @@ export function safeState(value: unknown): string {
   const allowed = new Set([
     'waiting', 'approved', 'denied', 'expired', 'cancelled', 'connected',
     'disconnected', 'revoked', 'rate_limited', 'scope_required', 'too_large',
-    'offline', 'invalid',
+    'calendar_not_connected', 'offline', 'invalid',
   ]);
   return typeof value === 'string' && allowed.has(value) ? value : 'invalid';
 }

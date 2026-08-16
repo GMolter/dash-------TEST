@@ -1,5 +1,55 @@
 # Milestone 0 diagnostic prototypes
 
+## Minimal native launcher POC
+
+`NativeLauncherPoc.ahk` is an additive visual proof of concept based on the supplied
+`olio-launcher-poc-iteration3.html` layout. It uses a 296-pixel quick-settings-style flyout:
+an uppercase Olio label, three compact rows with circular Fluent badges and live status
+text, chevrons only for expandable destinations, and a separated footer gear. Clipboard
+and Quick Pastes open as compact same-footprint subpanels with inline actions and the real
+production data/selection behavior. Dark and light surfaces follow the reference's neutral
+Windows flyout treatment while accents come from Olio's shared theme; system-theme and
+high-contrast behavior remain supported.
+
+Screenshot remains the inherited immediate action and its capture implementation is not
+overridden or modified. The footer gear only opens the existing standalone Settings menu.
+Unfinished destinations remain hidden. The POC subclasses the production `LauncherWindow`,
+but it does not modify the production entrypoint or class.
+
+Double-click `Run-NativeLauncherPoc.cmd` to start the POC. The runner intentionally closes
+only an existing production Olio Launcher and an older copy of this POC before starting a
+fresh POC. The POC then registers the configured global Focus Key, so the same launch key
+opens and hides the POC. To return to production, run `Run-OlioLauncher.cmd`.
+
+The POC intentionally shares the production profile selected for this evaluation:
+
+- Settings are read from and written to `%LOCALAPPDATA%\OlioLauncher\settings.json`.
+- Quick Pastes uses the same device identity and Windows Credential Manager credential.
+- Start-with-Windows changes update the production launcher startup entry.
+- Reset affects production settings, and Disconnect revokes the production launcher's
+  shared Olio device credential.
+- Focus Key edits are validated, saved, and registered by the running POC. Production
+  reads the same saved key the next time it starts.
+
+The normal runner prevents production and the POC from competing over in-memory settings
+or the global shortcut. Manual starts can bypass that protection, so do not start both
+entrypoints directly while changing Settings. Disconnect still revokes the shared device
+credential used when production is restarted. Clipboard and Quick Paste content remain
+subject to the production launcher's existing privacy boundaries.
+
+Run the isolated POC checks without opening either resident launcher:
+
+```powershell
+& "$env:ProgramFiles\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut `
+  ..\tests\NativeLauncherPocTests.ahk
+```
+
+For visual inspection without click-away hiding, network access, credential access, or a
+startup write, launch `NativeLauncherPoc.ahk --visual-test`. This diagnostic mode uses a
+third, isolated instance namespace and should be closed after inspection.
+
+The remainder of this document describes the earlier Milestone 0 diagnostic probes.
+
 These files are technical spikes, not the Olio Launcher application or production UI.
 They intentionally live outside the planned `src/` tree and must not be promoted to
 Milestone 1 without review.

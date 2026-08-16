@@ -18,6 +18,7 @@
 #Include ..\src\TileRenderer.ahk
 #Include ..\src\ClipboardRenderer.ahk
 #Include ..\src\QuickPastesRenderer.ahk
+#Include ..\src\CalendarRenderer.ahk
 #Include ..\src\ClipboardPreviewWindow.ahk
 #Include ..\src\SettingsDialog.ahk
 #Include ..\src\LauncherWindow.ahk
@@ -131,7 +132,8 @@ class Milestone7Tests {
             "focusKey", "#+F23",
             "startWithWindows", false,
             "openingMonitor", "active",
-            "openingPosition", "right",
+            "openingPosition", "middle-right",
+            "launcherScale", "standard",
             "panelWidth", 360,
             "alwaysOnTop", true,
             "closeOnFocusLost", true,
@@ -141,7 +143,7 @@ class Milestone7Tests {
             "sensitiveApplications",
                 "KeePass.exe;KeePassXC.exe;1Password.exe;Bitwarden.exe",
             "theme", "system",
-            "reducedMotion", false,
+            "reducedMotion", true,
             "loggingEnabled", false,
             "lastSelected", "clipboard",
             "rememberedMonitor", "",
@@ -164,6 +166,7 @@ class Milestone7Tests {
             "startWithWindows", "yes",
             "openingMonitor", "removed",
             "openingPosition", "floating",
+            "launcherScale", "enormous",
             "panelWidth", 279,
             "alwaysOnTop", "yes",
             "closeOnFocusLost", 2,
@@ -185,7 +188,7 @@ class Milestone7Tests {
                 this.Assert(recovered[key] = value,
                     "Invalid " key " did not recover to its safe default.")
         }
-        this.Assert(SettingsManager.Warnings.Length >= 18,
+        this.Assert(SettingsManager.Warnings.Length >= 17,
             "Invalid settings did not report content-free recovery warnings.")
 
         normalized := SettingsManager.NormalizeSensitiveApplications(
@@ -217,10 +220,11 @@ class Milestone7Tests {
         migrated := SettingsManager.Load()
         this.Assert(migrated["settingsSchemaVersion"] = 2
             && migrated["focusKey"] = "^!F24"
-            && migrated["panelWidth"] = 420,
+            && migrated["launcherScale"] = "large"
+            && migrated["panelWidth"] = 414,
             "Version 1 settings were not migrated.")
         this.Assert(migrated["openingMonitor"] = "active"
-            && migrated["openingPosition"] = "right"
+            && migrated["openingPosition"] = "middle-right"
             && SettingsManager.Migrated,
             "Obsolete placement values did not migrate safely.")
         this.Assert(!migrated.Has("futureField"),
@@ -230,7 +234,8 @@ class Milestone7Tests {
         FileAppend('{"settingsSchemaVersion":99,"panelWidth":400,'
             . '"unknownFutureSetting":true}', SettingsManager.SettingsPath, "UTF-8")
         future := SettingsManager.Load()
-        this.Assert(future["panelWidth"] = 400
+        this.Assert(future["launcherScale"] = "large"
+            && future["panelWidth"] = 414
             && future["settingsSchemaVersion"] = 2,
             "A future settings document caused startup failure or lost known values.")
 
@@ -380,6 +385,20 @@ class Milestone7Tests {
             this.Assert(geometry.Width = expectedWidth,
                 "Panel width did not scale at " dpi " DPI.")
         }
+        anchorExpectations := Map(
+            "top-left", [0, 0], "top-center", [820, 0],
+            "top-right", [1640, 0], "middle-left", [0, 350],
+            "middle-center", [820, 350], "middle-right", [1640, 350],
+            "bottom-left", [0, 700], "bottom-center", [820, 700],
+            "bottom-right", [1640, 700]
+        )
+        for anchor, expected in anchorExpectations {
+            coordinates := WindowsInterop.OpeningCoordinates(
+                this.Area(909, "ANCHOR", 0, 0, 2000, 1200, 96, true),
+                360, 500, anchor)
+            this.Assert(coordinates.X = expected[1] && coordinates.Y = expected[2],
+                "Opening anchor failed for " anchor ".")
+        }
     }
 
     static TestClipboardSettings() {
@@ -428,10 +447,10 @@ class Milestone7Tests {
             ThemeManager.Color("Window")) >= 4.5,
             "Light theme muted-text contrast is not readable.")
 
-        lightSettings["reducedMotion"] := true
+        lightSettings["reducedMotion"] := false
         ThemeManager.Configure(lightSettings)
         this.Assert(ThemeManager.ReducedMotion,
-            "Reduced-motion preference was not applied.")
+            "Motion was re-enabled by a legacy settings value.")
         window := LauncherWindow(lightSettings, (*) => 0, true)
         TileRenderer.HoveredHwnd := 0
         TileRenderer.OnMouseMove(0, 0, 0, window.Buttons["clipboard"].Hwnd)
@@ -481,15 +500,30 @@ class Milestone7Tests {
         this.Assert(window.Buttons["settings"].Text = "Settings"
             && !window.PageDefinitions.Has("settings"),
             "Settings still routes through an intermediate launcher page.")
-        this.Assert(!window.Buttons["sendToPhone"].Enabled
+        this.Assert(window.Buttons["calendar"].Enabled
             && !window.Buttons["networkAnalyzer"].Enabled,
-            "Deferred controls became programmatically interactive.")
+            "Calendar or deferred Network control state is incorrect.")
         this.Assert(window.AutoCloseOnDeactivate = false,
             "Visual-test isolation did not disable focus-loss close.")
         style := DllCall("GetWindowLongPtrW", "ptr", window.Gui.Hwnd,
             "int", -20, "ptr")
         this.Assert((style & 0x8) != 0,
             "Always-on-top default was not applied.")
+        runtimeSettings := Map()
+        for key, value in settings
+            runtimeSettings[key] := value
+        runtimeSettings["alwaysOnTop"] := false
+        runtimeSettings["launcherScale"] := "large"
+        runtimeSettings["panelWidth"] := 414
+        runtimeSettings["openingMonitor"] := "primary"
+        runtimeSettings["openingPosition"] := "top-right"
+        window.ApplyRuntimeSettings(runtimeSettings)
+        runtimeStyle := DllCall("GetWindowLongPtrW", "ptr", window.Gui.Hwnd,
+            "int", -20, "ptr")
+        this.Assert((runtimeStyle & 0x8) = 0 && window.LogicalWidth = 414
+            && window.Settings["openingMonitor"] = "primary"
+            && window.Settings["openingPosition"] = "top-right",
+            "Behavior settings were not applied to the running launcher model.")
 
         saveCalls := []
         applied := (action, changes) => (
@@ -500,25 +534,24 @@ class Milestone7Tests {
             && (DllCall("GetWindowLongPtrW", "ptr", dialog.Gui.Hwnd,
                 "int", -20, "ptr") & 0x80) = 0,
             "Settings is not a normal standalone application window.")
-        this.Assert(SettingsDialog.LogicalWidth = 620
-            && SettingsDialog.LogicalHeight = 460
-            && dialog.Pages.Count = 4,
-            "Settings is not the compact sectioned window.")
+        this.Assert(SettingsDialog.LogicalWidth = 780
+            && SettingsDialog.LogicalHeight = 620
+            && dialog.Pages.Count = 6,
+            "Settings is not the Fluent six-section window.")
         this.Assert(dialog.AccessibleNames.Count >= 24,
             "Primary preference controls lack explicit accessible names.")
         for hwnd, name in dialog.AccessibleNames
             this.Assert(hwnd && StrLen(name) >= 3,
                 "A preference control has an unusable accessible name.")
-        nextTab := DllCall("GetNextDlgTabItem", "ptr", dialog.Gui.Hwnd,
-            "ptr", dialog.FocusKeyEdit.Hwnd, "int", false, "ptr")
-        this.Assert(nextTab = dialog.TestFocusKeyButton.Hwnd,
-            "Preference Tab order is not logical after Focus Key.")
-        this.Assert(SettingsRenderer.Items[dialog.CloseButton.Hwnd].Title = "Close"
-            && SettingsRenderer.Items[dialog.ResetButton.Hwnd].Title = "Reset settings"
-            && dialog.Intro.Text = "Changes save automatically.",
+        this.Assert(SettingsRenderer.Items[dialog.FocusKeyRecorder.Hwnd].Kind = "hotkey"
+            && SettingsRenderer.Items[dialog.FocusKeyRecorder.Hwnd].Value
+                = "Windows + Shift + F23",
+            "Focus Key is not presented as a readable shortcut recorder.")
+        this.Assert(SettingsRenderer.Items[dialog.ResetButton.Hwnd].Title = "Reset settings"
+            && dialog.SidebarHint.Text = "Every change saves automatically.",
             "Auto-saving Settings actions lack useful native names.")
         this.Assert(SettingsRenderer.Items[dialog.CloseOnFocusLostCheck.Hwnd].Title
-            = "Hide when I click away"
+            = "Hide on click away"
             && dialog.ToggleValues["closeOnFocusLost"],
             "Click-away hiding is not clearly named or safely enabled by default.")
         this.Assert(dialog.Tooltips.Tools.Length >= 17
@@ -531,17 +564,29 @@ class Milestone7Tests {
             && InStr(tooltipText, "previously active app")
             && InStr(tooltipText, "Credential Manager"),
             "Settings tooltips do not explain privacy, paste, and account behavior.")
-        this.Assert(!dialog.Tabs.Has("advanced")
-            && SettingsRenderer.Items[dialog.MoreButton.Hwnd].Kind = "more",
-            "Advanced settings are advertised as a primary destination.")
+        this.Assert(dialog.Tabs.Has("advanced") && dialog.Tabs.Has("behavior")
+            && dialog.Tabs.Has("appearance")
+            && SettingsRenderer.Items[dialog.Tabs["advanced"].Hwnd].Kind = "nav",
+            "Settings navigation does not expose all primary destinations.")
         switchStarted := A_TickCount
         Loop 20
             dialog.ShowSection(Mod(A_Index, 2) ? "clipboard" : "general")
         this.Assert(A_TickCount - switchStarted < 1000,
             "Settings section switching is unexpectedly slow.")
-        dialog.ShowSection("advanced")
-        this.Assert(dialog.SensitiveEdit.Visible && !dialog.FocusKeyEdit.Visible,
+        dialog.ShowSection("clipboard")
+        this.Assert(dialog.SensitiveList.Visible && !dialog.FocusKeyRecorder.Visible,
             "Settings section navigation did not show only the selected section.")
+        this.Assert(dialog.AddSensitiveExecutableName("SyntheticApp.exe")
+            && InStr(dialog.SensitiveEdit.Value, "SyntheticApp.exe")
+            && DllCall("SendMessageW", "ptr", dialog.SensitiveList.Hwnd,
+                "uint", 0x018B, "ptr", 0, "ptr", 0) = 5,
+            "Executable exclusions are not managed as a normalized list.")
+        dialog.SensitiveList.Choose(5)
+        this.Assert(dialog.RemoveSensitiveExecutable()
+            && !InStr(dialog.SensitiveEdit.Value, "SyntheticApp.exe")
+            && DllCall("SendMessageW", "ptr", dialog.SensitiveList.Hwnd,
+                "uint", 0x018B, "ptr", 0, "ptr", 0) = 4,
+            "Executable exclusion removal did not update serialization.")
         dialog.ShowSection("account")
         this.Assert(SettingsRenderer.Items[dialog.ConnectButton.Hwnd].Title
             = "Connect Olio account"
@@ -550,23 +595,45 @@ class Milestone7Tests {
         this.Assert(!dialog.ConnectButton.Enabled,
             "Unavailable isolated account controls are not programmatically disabled.")
         dialog.ShowSection("general")
+        priorSaves := saveCalls.Length
         dialog.ToggleSetting("startWithWindows", dialog.StartWithWindowsCheck)
-        this.Assert(saveCalls.Length = 1
-            && saveCalls[1].Action = "save"
-            && saveCalls[1].Changes["startWithWindows"]
+        this.Assert(saveCalls.Length = priorSaves + 1
+            && saveCalls[saveCalls.Length].Action = "save"
+            && saveCalls[saveCalls.Length].Changes["startWithWindows"]
             && dialog.Status.Text = "Saved",
             "Selecting a setting did not save it immediately.")
-        dialog.PanelWidthEdit.Value := "420"
-        dialog.QueueAutoSave(false)
-        this.Assert(dialog.PendingSave,
-            "Typed settings were not queued for debounced auto-save.")
-        dialog.AutoSave()
-        this.Assert(saveCalls.Length = 2
-            && saveCalls[2].Changes["panelWidth"] = 420,
-            "Debounced text input did not auto-save.")
+        dialog.ShowSection("behavior")
+        dialog.SelectSegment("openingMonitor", "primary", dialog.MonitorList)
+        this.Assert(saveCalls[saveCalls.Length].Changes["openingMonitor"] = "primary",
+            "Opening-monitor selection did not save through the behavior UI.")
+        dialog.SelectPlacement("top-right")
+        this.Assert(saveCalls[saveCalls.Length].Changes["openingPosition"] = "top-right"
+            && dialog.OpeningPositionValue = "top-right",
+            "Opening-position picker did not save the selected anchor.")
+        behaviorToggles := Map(
+            "alwaysOnTop", dialog.AlwaysOnTopCheck,
+            "closeOnFocusLost", dialog.CloseOnFocusLostCheck,
+            "closeAfterSelection", dialog.CloseAfterSelectionCheck,
+            "autoPasteAfterSelection", dialog.AutoPasteCheck
+        )
+        for key, control in behaviorToggles {
+            originalValue := dialog.ToggleValues[key]
+            dialog.ToggleSetting(key, control)
+            this.Assert(saveCalls[saveCalls.Length].Changes[key] = !originalValue,
+                key " did not save through the behavior UI.")
+            dialog.ToggleSetting(key, control)
+            this.Assert(saveCalls[saveCalls.Length].Changes[key] = originalValue,
+                key " did not restore through the behavior UI.")
+        }
+        dialog.ScaleList.Choose(3)
+        dialog.QueueAutoSave(true)
+        this.Assert(saveCalls[saveCalls.Length].Changes["launcherScale"] = "large"
+            && saveCalls[saveCalls.Length].Changes["panelWidth"] = 414,
+            "Launcher scale selection did not save its compatible dimensions.")
         candidate := dialog.Candidate()
         this.Assert(candidate.Ok
-            && candidate.Values["autoPasteAfterSelection"] = false,
+            && candidate.Values["autoPasteAfterSelection"] = false
+            && candidate.Values["reducedMotion"] = true,
             "The native dialog did not model the opt-in auto-paste default.")
         dialog.Close()
 
@@ -655,9 +722,9 @@ class Milestone7Tests {
             "i)__quick_(create|edit|delete|reorder|favorite)"),
             "Launcher gained forbidden Quick Paste management.")
         this.Assert(InStr(launcherSource,
-            'Key: "sendToPhone"') && InStr(launcherSource, 'Enabled: false')
+            'Key: "calendar"') && InStr(launcherSource, 'Title: "Calendar"')
             && InStr(launcherSource, 'Key: "networkAnalyzer"'),
-            "Deferred feature placeholders changed.")
+            "Calendar replacement or deferred Network definition is missing.")
 
         functionCount := 0
         apiRoot := A_ScriptDir "\..\..\OlioWorkstation\api"

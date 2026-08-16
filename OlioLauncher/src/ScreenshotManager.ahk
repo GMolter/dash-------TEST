@@ -4,6 +4,12 @@ class ScreenshotManager {
     static CAPTUREBLT := 0x40000000
     static IDC_ARROW := 32512
     static IDC_CROSS := 32515
+    static BORDER_WIDTH := 2
+    static DIM_ALPHA := 108
+    static ACCENT := 0x8B5CF6
+    static OVERLAY := 0x020617
+    static SURFACE := 0x0B1220
+    static TEXT := 0xF8FAFC
 
     __New(clipboardManager := 0, finishedCallback := 0) {
         this.ClipboardManager := clipboardManager
@@ -12,12 +18,24 @@ class ScreenshotManager {
         this.Dragging := false
         this.HasSelection := false
         this.Overlay := 0
+        this.SelectionHwnd := 0
         this.Bounds := 0
+        this.FrozenBitmap := 0
+        this.FrozenDc := 0
+        this.FrozenOriginal := 0
+        this.DimBitmap := 0
+        this.DimDc := 0
+        this.DimOriginal := 0
+        this.SelectionBitmap := 0
+        this.SelectionDc := 0
+        this.SelectionOriginal := 0
         this.PreviousForeground := 0
         this.StartX := 0
         this.StartY := 0
         this.CurrentX := 0
         this.CurrentY := 0
+        this.LastSelectionRect := 0
+        this.InstructionDpi := 96
         this.OverlayLatencyMs := 0.0
         this.LastResult := {Status: "ready", OverlayLatencyMs: 0.0,
             CompletionLatencyMs: 0.0}
@@ -62,6 +80,13 @@ class ScreenshotManager {
         try {
             if !ScreenshotManager.ValidBounds(this.Bounds)
                 throw ValueError("The virtual desktop has no capturable area.")
+            this.InstructionDpi := ScreenshotManager.DpiAtPoint(
+                this.Bounds.Left + Floor(this.Bounds.Width / 2),
+                this.Bounds.Top + 1)
+            ; Freeze one compositor-complete frame before any capture UI is visible.
+            ScreenshotManager.FlushDesktopComposition()
+            if !this.CaptureFrozenDesktop()
+                throw OSError()
             this.CreateOverlay()
             this.OverlayLatencyMs := ScreenshotManager.QpcMs(started)
             this.LastResult := {Status: "selecting",
@@ -77,18 +102,21 @@ class ScreenshotManager {
     CreateOverlay() {
         bounds := this.Bounds
         overlay := Gui("+AlwaysOnTop -Caption +ToolWindow -DPIScale",
-            "Olio Dynamic Screenshot — drag to select; Escape cancels")
-        overlay.BackColor := "000000"
+            "Olio Screenshot — select an area; Escape cancels")
+        overlay.BackColor := Format("{:06X}", ScreenshotManager.OVERLAY)
         this.Overlay := overlay
-        overlay.Show("x" bounds.Left " y" bounds.Top " w" bounds.Width
+        ; Size the opaque frozen-frame surface while hidden so activation never flashes
+        ; an unpainted window over the desktop.
+        overlay.Show("Hide x" bounds.Left " y" bounds.Top " w" bounds.Width
             " h" bounds.Height)
+        if !this.CreateSelectionSurface()
+            throw OSError()
         ; SetWindowPos uses the physical virtual-desktop rectangle directly. This keeps
         ; negative coordinates and mixed-DPI monitor spans out of AHK's GUI scaling.
         if !DllCall("SetWindowPos", "ptr", overlay.Hwnd, "ptr", -1,
             "int", bounds.Left, "int", bounds.Top, "int", bounds.Width,
             "int", bounds.Height, "uint", 0x0040)
             throw OSError()
-        WinSetTransparent(112, "ahk_id " overlay.Hwnd)
         DllCall("SetForegroundWindow", "ptr", overlay.Hwnd)
         DllCall("SetFocus", "ptr", overlay.Hwnd, "ptr")
         DllCall("UpdateWindow", "ptr", overlay.Hwnd)
@@ -96,6 +124,55 @@ class ScreenshotManager {
             ScreenshotManager.IDC_CROSS, "ptr")
         if cursor
             DllCall("SetCursor", "ptr", cursor)
+    }
+
+    CreateSelectionSurface() {
+        if !IsObject(this.Overlay)
+            return false
+        ; This top-level owned surface is never conventionally painted. UpdateLayeredWindow
+        ; presents its pixels, size, and position to DWM in one atomic operation.
+        this.SelectionHwnd := DllCall("CreateWindowExW",
+            "uint", 0x00080000 | 0x00000020 | 0x08000000 | 0x00000080
+                | 0x00000008,
+            "str", "Static", "str", "", "uint", 0x80000000,
+            "int", 0, "int", 0,
+            "int", 1, "int", 1, "ptr", this.Overlay.Hwnd,
+            "ptr", 0, "ptr", 0, "ptr", 0, "ptr")
+        return this.SelectionHwnd != 0
+    }
+
+    UpdateSelectionSurface(rect) {
+        this.LastSelectionRect := rect
+        if !this.SelectionHwnd
+            return
+        if !IsObject(rect) || rect.Width <= 0 || rect.Height <= 0 {
+            DllCall("ShowWindow", "ptr", this.SelectionHwnd, "int", 0)
+            return
+        }
+        if !this.SelectionDc || !this.FrozenDc
+            throw OSError()
+        sourceX := rect.Left - this.Bounds.Left
+        sourceY := rect.Top - this.Bounds.Top
+        if !DllCall("BitBlt", "ptr", this.SelectionDc, "int", 0, "int", 0,
+            "int", rect.Width, "int", rect.Height, "ptr", this.FrozenDc,
+            "int", sourceX, "int", sourceY, "uint", ScreenshotManager.SRCCOPY)
+            throw OSError()
+        this.PaintSelectionBorder(this.SelectionDc, 0, 0, rect.Width, rect.Height)
+
+        destination := Buffer(8, 0)
+        NumPut("int", rect.Left, destination, 0)
+        NumPut("int", rect.Top, destination, 4)
+        size := Buffer(8, 0)
+        NumPut("int", rect.Width, size, 0)
+        NumPut("int", rect.Height, size, 4)
+        source := Buffer(8, 0)
+        if !DllCall("UpdateLayeredWindow", "ptr", this.SelectionHwnd,
+            "ptr", 0, "ptr", destination, "ptr", size,
+            "ptr", this.SelectionDc, "ptr", source, "uint", 0,
+            "ptr", 0, "uint", 0x4)
+            throw OSError()
+        if !DllCall("IsWindowVisible", "ptr", this.SelectionHwnd)
+            DllCall("ShowWindow", "ptr", this.SelectionHwnd, "int", 4)
     }
 
     static VirtualDesktopBounds() {
@@ -190,8 +267,10 @@ class ScreenshotManager {
             this.CurrentX := point.X, this.CurrentY := point.Y
             this.Dragging := true
             this.HasSelection := true
+            rect := ScreenshotManager.NormalizeSelection(
+                this.StartX, this.StartY, this.CurrentX, this.CurrentY, this.Bounds)
             DllCall("SetCapture", "ptr", this.Overlay.Hwnd, "ptr")
-            this.InvalidateOverlay()
+            this.UpdateSelectionSurface(rect)
         } catch {
             this.Abort("selection-failed")
         }
@@ -203,11 +282,16 @@ class ScreenshotManager {
             return
         try {
             point := this.CursorPosition()
-            this.CurrentX := ScreenshotManager.Clamp(point.X,
+            nextX := ScreenshotManager.Clamp(point.X,
                 this.Bounds.Left, this.Bounds.Right)
-            this.CurrentY := ScreenshotManager.Clamp(point.Y,
+            nextY := ScreenshotManager.Clamp(point.Y,
                 this.Bounds.Top, this.Bounds.Bottom)
-            this.InvalidateOverlay()
+            if nextX = this.CurrentX && nextY = this.CurrentY
+                return 0
+            this.CurrentX := nextX, this.CurrentY := nextY
+            rect := ScreenshotManager.NormalizeSelection(
+                this.StartX, this.StartY, this.CurrentX, this.CurrentY, this.Bounds)
+            this.UpdateSelectionSurface(rect)
         } catch {
             this.Abort("selection-failed")
         }
@@ -247,11 +331,17 @@ class ScreenshotManager {
 
         bitmap := 0
         status := "capture-failed"
+        usesFrozenFrame := this.SelectionUsesFrozenFrame(rect)
+        if usesFrozenFrame
+            bitmap := this.CopyFrozenSelection(rect)
         this.CleanupOverlay()
-        ; Let DWM remove the dim overlay before reading the physical screen pixels.
-        Sleep(20)
         try {
-            bitmap := ScreenshotManager.CaptureScreenRect(rect)
+            ; Direct test callers can provide a rectangle outside the active overlay.
+            ; Real pointer selections always use the frozen activation frame.
+            if !usesFrozenFrame {
+                ScreenshotManager.FlushDesktopComposition()
+                bitmap := ScreenshotManager.CaptureScreenRect(rect)
+            }
             if !bitmap
                 throw OSError()
             if this.PublishBitmap(bitmap) {
@@ -278,6 +368,95 @@ class ScreenshotManager {
         try return ScreenshotManager.CopyPixelsToBitmap(screenDc, rect.Left,
             rect.Top, rect.Width, rect.Height)
         finally DllCall("ReleaseDC", "ptr", 0, "ptr", screenDc)
+    }
+
+    CaptureFrozenDesktop() {
+        this.ReleaseFrozenDesktop()
+        this.FrozenBitmap := ScreenshotManager.CaptureScreenRect(this.Bounds)
+        if !this.FrozenBitmap
+            return false
+        screenDc := DllCall("GetDC", "ptr", 0, "ptr")
+        if !screenDc {
+            this.ReleaseFrozenDesktop()
+            return false
+        }
+        try {
+            this.FrozenDc := DllCall("CreateCompatibleDC", "ptr", screenDc, "ptr")
+            this.DimDc := DllCall("CreateCompatibleDC", "ptr", screenDc, "ptr")
+            this.SelectionDc := DllCall("CreateCompatibleDC", "ptr", screenDc, "ptr")
+            this.DimBitmap := DllCall("CreateCompatibleBitmap", "ptr", screenDc,
+                "int", 1, "int", 1, "ptr")
+            this.SelectionBitmap := DllCall("CreateCompatibleBitmap", "ptr", screenDc,
+                "int", this.Bounds.Width, "int", this.Bounds.Height, "ptr")
+            if !this.FrozenDc || !this.DimDc || !this.SelectionDc
+                || !this.DimBitmap || !this.SelectionBitmap {
+                this.ReleaseFrozenDesktop()
+                return false
+            }
+            this.FrozenOriginal := DllCall("SelectObject", "ptr", this.FrozenDc,
+                "ptr", this.FrozenBitmap, "ptr")
+            this.DimOriginal := DllCall("SelectObject", "ptr", this.DimDc,
+                "ptr", this.DimBitmap, "ptr")
+            this.SelectionOriginal := DllCall("SelectObject", "ptr", this.SelectionDc,
+                "ptr", this.SelectionBitmap, "ptr")
+            if !this.FrozenOriginal || this.FrozenOriginal = -1
+                || !this.DimOriginal || this.DimOriginal = -1
+                || !this.SelectionOriginal || this.SelectionOriginal = -1 {
+                this.ReleaseFrozenDesktop()
+                return false
+            }
+            pixel := Buffer(16, 0)
+            NumPut("int", 1, pixel, 8), NumPut("int", 1, pixel, 12)
+            brush := DllCall("CreateSolidBrush", "uint", 0, "ptr")
+            try return brush && DllCall("FillRect", "ptr", this.DimDc,
+                "ptr", pixel, "ptr", brush)
+            finally {
+                if brush
+                    DllCall("DeleteObject", "ptr", brush)
+            }
+        } finally DllCall("ReleaseDC", "ptr", 0, "ptr", screenDc)
+    }
+
+    ReleaseFrozenDesktop() {
+        if this.FrozenDc && this.FrozenOriginal && this.FrozenOriginal != -1
+            DllCall("SelectObject", "ptr", this.FrozenDc,
+                "ptr", this.FrozenOriginal, "ptr")
+        if this.DimDc && this.DimOriginal && this.DimOriginal != -1
+            DllCall("SelectObject", "ptr", this.DimDc,
+                "ptr", this.DimOriginal, "ptr")
+        if this.SelectionDc && this.SelectionOriginal && this.SelectionOriginal != -1
+            DllCall("SelectObject", "ptr", this.SelectionDc,
+                "ptr", this.SelectionOriginal, "ptr")
+        if this.FrozenBitmap
+            DllCall("DeleteObject", "ptr", this.FrozenBitmap)
+        if this.DimBitmap
+            DllCall("DeleteObject", "ptr", this.DimBitmap)
+        if this.SelectionBitmap
+            DllCall("DeleteObject", "ptr", this.SelectionBitmap)
+        if this.FrozenDc
+            DllCall("DeleteDC", "ptr", this.FrozenDc)
+        if this.DimDc
+            DllCall("DeleteDC", "ptr", this.DimDc)
+        if this.SelectionDc
+            DllCall("DeleteDC", "ptr", this.SelectionDc)
+        this.FrozenBitmap := 0, this.FrozenDc := 0, this.FrozenOriginal := 0
+        this.DimBitmap := 0, this.DimDc := 0, this.DimOriginal := 0
+        this.SelectionBitmap := 0, this.SelectionDc := 0
+        this.SelectionOriginal := 0
+    }
+
+    SelectionUsesFrozenFrame(rect) {
+        return IsObject(this.Bounds) && this.FrozenDc
+            && rect.Left >= this.Bounds.Left && rect.Top >= this.Bounds.Top
+            && rect.Right <= this.Bounds.Right && rect.Bottom <= this.Bounds.Bottom
+    }
+
+    CopyFrozenSelection(rect) {
+        if !this.SelectionUsesFrozenFrame(rect)
+            return 0
+        return ScreenshotManager.CopyPixelsToBitmap(this.FrozenDc,
+            rect.Left - this.Bounds.Left, rect.Top - this.Bounds.Top,
+            rect.Width, rect.Height)
     }
 
     static CopyPixelsToBitmap(sourceDc, sourceX, sourceY, width, height) {
@@ -396,6 +575,10 @@ class ScreenshotManager {
     CleanupOverlay() {
         overlay := this.Overlay
         this.Overlay := 0
+        selectionHwnd := this.SelectionHwnd
+        this.SelectionHwnd := 0
+        if selectionHwnd
+            try DllCall("DestroyWindow", "ptr", selectionHwnd)
         if IsObject(overlay) {
             try {
                 if DllCall("GetCapture", "ptr") = overlay.Hwnd
@@ -405,8 +588,10 @@ class ScreenshotManager {
         } else {
             try DllCall("ReleaseCapture")
         }
+        this.ReleaseFrozenDesktop()
         this.Dragging := false
         this.HasSelection := false
+        this.LastSelectionRect := 0
         arrow := DllCall("LoadCursorW", "ptr", 0, "ptr",
             ScreenshotManager.IDC_ARROW, "ptr")
         if arrow
@@ -454,79 +639,125 @@ class ScreenshotManager {
     }
 
     PaintOverlay(hdc, hwnd) {
-        client := Buffer(16, 0)
-        DllCall("GetClientRect", "ptr", hwnd, "ptr", client)
-        black := DllCall("CreateSolidBrush", "uint", ScreenshotManager.ColorRef(0x020617), "ptr")
-        try DllCall("FillRect", "ptr", hdc, "ptr", client, "ptr", black)
-        finally DllCall("DeleteObject", "ptr", black)
+        this.PaintFrozenBase(hdc)
+        this.PaintInstructions(hdc)
+    }
 
-        dpi := ScreenshotManager.DpiAtPoint(this.CurrentX, this.CurrentY)
-        instructionFont := ScreenshotManager.CreateFont(11, 600, dpi)
-        oldFont := DllCall("SelectObject", "ptr", hdc, "ptr", instructionFont, "ptr")
-        oldMode := DllCall("SetBkMode", "ptr", hdc, "int", 1, "int")
-        oldColor := DllCall("SetTextColor", "ptr", hdc,
-            "uint", ScreenshotManager.ColorRef(0xF8FAFC), "uint")
-        instruction := "Drag to select  •  Esc to cancel"
-        inset := ScreenshotManager.ScaleDip(18, dpi)
-        DllCall("TextOutW", "ptr", hdc, "int", inset, "int", inset,
-            "str", instruction, "int", StrLen(instruction))
-        DllCall("SetTextColor", "ptr", hdc, "uint", oldColor)
-        DllCall("SetBkMode", "ptr", hdc, "int", oldMode)
-        DllCall("SelectObject", "ptr", hdc, "ptr", oldFont)
-        DllCall("DeleteObject", "ptr", instructionFont)
 
-        if !this.HasSelection
+    PaintSelectionBorder(hdc, left, top, right, bottom) {
+        if right <= left || bottom <= top
             return
-        rect := ScreenshotManager.NormalizeSelection(this.StartX, this.StartY,
-            this.CurrentX, this.CurrentY, this.Bounds)
-        left := rect.Left - this.Bounds.Left
-        top := rect.Top - this.Bounds.Top
-        right := rect.Right - this.Bounds.Left
-        bottom := rect.Bottom - this.Bounds.Top
-        lineWidth := Max(2, ScreenshotManager.ScaleDip(2, dpi))
-        pen := DllCall("CreatePen", "int", 0, "int", lineWidth,
-            "uint", ScreenshotManager.ColorRef(0x38BDF8), "ptr")
-        oldPen := DllCall("SelectObject", "ptr", hdc, "ptr", pen, "ptr")
-        hollow := DllCall("GetStockObject", "int", 5, "ptr")
-        oldBrush := DllCall("SelectObject", "ptr", hdc, "ptr", hollow, "ptr")
-        DllCall("Rectangle", "ptr", hdc, "int", left, "int", top,
-            "int", right, "int", bottom)
-        DllCall("SelectObject", "ptr", hdc, "ptr", oldBrush)
-        DllCall("SelectObject", "ptr", hdc, "ptr", oldPen)
-        DllCall("DeleteObject", "ptr", pen)
+        borderWidth := ScreenshotManager.BORDER_WIDTH
+        brush := DllCall("CreateSolidBrush", "uint",
+            ScreenshotManager.ColorRef(ScreenshotManager.ACCENT), "ptr")
+        if !brush
+            return
+        try {
+            this.FillSolidRect(hdc, brush, left, top, right,
+                Min(bottom, top + borderWidth))
+            this.FillSolidRect(hdc, brush, left, Max(top, bottom - borderWidth),
+                right, bottom)
+            this.FillSolidRect(hdc, brush, left, top,
+                Min(right, left + borderWidth), bottom)
+            this.FillSolidRect(hdc, brush, Max(left, right - borderWidth), top,
+                right, bottom)
+        } finally DllCall("DeleteObject", "ptr", brush)
+    }
 
-        label := rect.Width " × " rect.Height " px"
-        labelFont := ScreenshotManager.CreateFont(10, 600, dpi)
-        oldFont := DllCall("SelectObject", "ptr", hdc, "ptr", labelFont, "ptr")
+    FillSolidRect(hdc, brush, left, top, right, bottom) {
+        if right <= left || bottom <= top
+            return
+        rect := Buffer(16, 0)
+        NumPut("int", left, rect, 0), NumPut("int", top, rect, 4)
+        NumPut("int", right, rect, 8), NumPut("int", bottom, rect, 12)
+        DllCall("FillRect", "ptr", hdc, "ptr", rect, "ptr", brush)
+    }
+
+    PaintFrozenBase(hdc) {
+        clip := Buffer(16, 0)
+        clipType := DllCall("GetClipBox", "ptr", hdc, "ptr", clip, "int")
+        if clipType = 0
+            return
+        left := NumGet(clip, 0, "int"), top := NumGet(clip, 4, "int")
+        right := NumGet(clip, 8, "int"), bottom := NumGet(clip, 12, "int")
+        width := right - left, height := bottom - top
+        if width <= 0 || height <= 0
+            return
+
+        if !this.FrozenDc || !DllCall("BitBlt", "ptr", hdc,
+            "int", left, "int", top, "int", width, "int", height,
+            "ptr", this.FrozenDc, "int", left, "int", top,
+            "uint", ScreenshotManager.SRCCOPY) {
+            fallback := Buffer(16, 0)
+            NumPut("int", left, fallback, 0), NumPut("int", top, fallback, 4)
+            NumPut("int", right, fallback, 8), NumPut("int", bottom, fallback, 12)
+            brush := DllCall("CreateSolidBrush", "uint",
+                ScreenshotManager.ColorRef(ScreenshotManager.OVERLAY), "ptr")
+            try {
+                if brush
+                    DllCall("FillRect", "ptr", hdc, "ptr", fallback, "ptr", brush)
+            }
+            finally {
+                if brush
+                    DllCall("DeleteObject", "ptr", brush)
+            }
+            return
+        }
+
+        if this.DimDc {
+            ; BLENDFUNCTION: AC_SRC_OVER with a constant black alpha and no per-pixel alpha.
+            blend := ScreenshotManager.DIM_ALPHA << 16
+            DllCall("msimg32\AlphaBlend", "ptr", hdc,
+                "int", left, "int", top, "int", width, "int", height,
+                "ptr", this.DimDc, "int", 0, "int", 0, "int", 1, "int", 1,
+                "uint", blend, "int")
+        }
+    }
+
+    PaintInstructions(hdc) {
+        clip := Buffer(16, 0)
+        if DllCall("GetClipBox", "ptr", hdc, "ptr", clip, "int") = 0
+            return
+        dpi := this.InstructionDpi
+        instructionBandBottom := ScreenshotManager.ScaleDip(80, dpi)
+        if NumGet(clip, 4, "int") >= instructionBandBottom
+            || NumGet(clip, 12, "int") <= 0
+            return
+        instruction := "Select an area    Esc to cancel"
+        font := ScreenshotManager.CreateFont(10, 600, dpi)
+        oldFont := DllCall("SelectObject", "ptr", hdc, "ptr", font, "ptr")
         size := Buffer(8, 0)
-        DllCall("GetTextExtentPoint32W", "ptr", hdc, "str", label,
-            "int", StrLen(label), "ptr", size)
-        padding := ScreenshotManager.ScaleDip(7, dpi)
-        labelWidth := NumGet(size, 0, "int") + padding * 2
-        labelHeight := NumGet(size, 4, "int") + padding
-        labelLeft := ScreenshotManager.Clamp(left + lineWidth,
-            0, Max(0, this.Bounds.Width - labelWidth))
-        labelTop := top - labelHeight - lineWidth
-        if labelTop < 0
-            labelTop := Min(this.Bounds.Height - labelHeight, bottom + lineWidth)
-        labelRect := Buffer(16, 0)
-        NumPut("int", labelLeft, labelRect, 0)
-        NumPut("int", labelTop, labelRect, 4)
-        NumPut("int", labelLeft + labelWidth, labelRect, 8)
-        NumPut("int", labelTop + labelHeight, labelRect, 12)
-        labelBrush := DllCall("CreateSolidBrush", "uint",
-            ScreenshotManager.ColorRef(0x0F172A), "ptr")
-        DllCall("FillRect", "ptr", hdc, "ptr", labelRect, "ptr", labelBrush)
-        DllCall("DeleteObject", "ptr", labelBrush)
+        DllCall("GetTextExtentPoint32W", "ptr", hdc, "str", instruction,
+            "int", StrLen(instruction), "ptr", size)
+        paddingX := ScreenshotManager.ScaleDip(16, dpi)
+        paddingY := ScreenshotManager.ScaleDip(9, dpi)
+        width := NumGet(size, 0, "int") + paddingX * 2
+        height := NumGet(size, 4, "int") + paddingY * 2
+        left := Max(0, Floor((this.Bounds.Width - width) / 2))
+        top := ScreenshotManager.ScaleDip(18, dpi)
+        brush := DllCall("CreateSolidBrush", "uint",
+            ScreenshotManager.ColorRef(ScreenshotManager.SURFACE), "ptr")
+        pen := DllCall("CreatePen", "int", 0, "int", 1,
+            "uint", ScreenshotManager.ColorRef(ScreenshotManager.ACCENT), "ptr")
+        oldBrush := DllCall("SelectObject", "ptr", hdc, "ptr", brush, "ptr")
+        oldPen := DllCall("SelectObject", "ptr", hdc, "ptr", pen, "ptr")
+        radius := ScreenshotManager.ScaleDip(10, dpi)
+        DllCall("RoundRect", "ptr", hdc, "int", left, "int", top,
+            "int", left + width, "int", top + height,
+            "int", radius, "int", radius)
+        DllCall("SelectObject", "ptr", hdc, "ptr", oldPen)
+        DllCall("SelectObject", "ptr", hdc, "ptr", oldBrush)
+        DllCall("DeleteObject", "ptr", pen)
+        DllCall("DeleteObject", "ptr", brush)
         oldMode := DllCall("SetBkMode", "ptr", hdc, "int", 1, "int")
         oldColor := DllCall("SetTextColor", "ptr", hdc,
-            "uint", ScreenshotManager.ColorRef(0xF8FAFC), "uint")
-        DllCall("TextOutW", "ptr", hdc, "int", labelLeft + padding,
-            "int", labelTop + Floor(padding / 2), "str", label, "int", StrLen(label))
+            "uint", ScreenshotManager.ColorRef(ScreenshotManager.TEXT), "uint")
+        DllCall("TextOutW", "ptr", hdc, "int", left + paddingX,
+            "int", top + paddingY, "str", instruction, "int", StrLen(instruction))
         DllCall("SetTextColor", "ptr", hdc, "uint", oldColor)
         DllCall("SetBkMode", "ptr", hdc, "int", oldMode)
         DllCall("SelectObject", "ptr", hdc, "ptr", oldFont)
-        DllCall("DeleteObject", "ptr", labelFont)
+        DllCall("DeleteObject", "ptr", font)
     }
 
     static CreateFont(points, weight, dpi) {
@@ -539,6 +770,15 @@ class ScreenshotManager {
 
     static ColorRef(rgb) {
         return ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF)
+    }
+
+    static FlushDesktopComposition() {
+        try {
+            if DllCall("dwmapi\DwmFlush", "int") = 0
+                return
+        }
+        ; Composition can be unavailable in classic or remote sessions.
+        Sleep(8)
     }
 
     Shutdown(notify := false) {

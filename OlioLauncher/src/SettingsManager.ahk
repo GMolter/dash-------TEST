@@ -16,7 +16,8 @@ class SettingsManager {
             "focusKey", "#+F23",
             "startWithWindows", false,
             "openingMonitor", "active",
-            "openingPosition", "right",
+            "openingPosition", "middle-right",
+            "launcherScale", "standard",
             "panelWidth", 360,
             "alwaysOnTop", true,
             "closeOnFocusLost", true,
@@ -25,7 +26,7 @@ class SettingsManager {
             "clipboardPaused", false,
             "sensitiveApplications", "KeePass.exe;KeePassXC.exe;1Password.exe;Bitwarden.exe",
             "theme", "system",
-            "reducedMotion", false,
+            "reducedMotion", true,
             "loggingEnabled", false,
             "lastSelected", "clipboard",
             "rememberedMonitor", "",
@@ -88,8 +89,10 @@ class SettingsManager {
             ; identity or connection metadata.
             if result.Has("openingMonitor") && result["openingMonitor"] = "foreground"
                 result["openingMonitor"] := "active"
-            if result.Has("openingPosition") && result["openingPosition"] = "edge"
-                result["openingPosition"] := "right"
+            if result.Has("openingPosition")
+                && (result["openingPosition"] = "edge"
+                    || result["openingPosition"] = "right")
+                result["openingPosition"] := "middle-right"
             result["settingsSchemaVersion"] := 2
             this.Migrated := true
             this.Warnings.Push("settings-migrated-v2")
@@ -110,9 +113,25 @@ class SettingsManager {
         this.AcceptBoolean(candidate, result, "startWithWindows")
         this.AcceptEnum(candidate, result, "openingMonitor",
             ["active", "primary", "remembered"])
-        this.AcceptEnum(candidate, result, "openingPosition", ["right", "remembered"])
-        this.AcceptInteger(candidate, result, "panelWidth",
-            this.MinimumPanelWidth, this.MaximumPanelWidth)
+        if candidate.Has("openingPosition")
+            && (candidate["openingPosition"] = "top-right"
+                || candidate["openingPosition"] = "middle-right")
+            result["openingPosition"] := candidate["openingPosition"]
+        else if candidate.Has("openingPosition") {
+            result["openingPosition"] := "middle-right"
+            this.Warnings.Push("openingPosition-defaulted")
+        }
+        if candidate.Has("launcherScale")
+            this.AcceptEnum(candidate, result, "launcherScale",
+                ["compact", "standard", "large"])
+        else if candidate.Has("panelWidth") && Type(candidate["panelWidth"]) = "Integer"
+            && candidate["panelWidth"] >= this.MinimumPanelWidth
+            && candidate["panelWidth"] <= this.MaximumPanelWidth {
+            result["launcherScale"] := candidate["panelWidth"] <= 336 ? "compact"
+                : candidate["panelWidth"] >= 396 ? "large" : "standard"
+        } else if candidate.Has("panelWidth")
+            this.Warnings.Push("panelWidth-defaulted")
+        result["panelWidth"] := this.PanelWidthForScale(result["launcherScale"])
         this.AcceptBoolean(candidate, result, "alwaysOnTop")
         this.AcceptBoolean(candidate, result, "closeOnFocusLost")
         this.AcceptBoolean(candidate, result, "closeAfterSelection")
@@ -120,7 +139,9 @@ class SettingsManager {
         this.AcceptBoolean(candidate, result, "clipboardPaused")
         this.AcceptSensitiveApplications(candidate, result)
         this.AcceptEnum(candidate, result, "theme", ["system", "dark", "light"])
-        this.AcceptBoolean(candidate, result, "reducedMotion")
+        ; Motion is permanently reduced. Keep the legacy field in schema v2 so older
+        ; settings files remain compatible, but never re-enable animation from disk.
+        result["reducedMotion"] := true
         this.AcceptBoolean(candidate, result, "loggingEnabled")
         this.AcceptEnum(candidate, result, "lastSelected",
             ["clipboard", "screenshot", "quickPastes", "settings"])
@@ -133,6 +154,10 @@ class SettingsManager {
         this.AcceptString(candidate, result, "connectedDeviceName", 0, 80)
         this.AcceptString(candidate, result, "connectedAt", 0, 40)
         return result
+    }
+
+    static PanelWidthForScale(scale) {
+        return scale = "compact" ? 324 : scale = "large" ? 414 : 360
     }
 
     static AcceptString(candidate, result, key, minimum, maximum) {
@@ -234,6 +259,10 @@ class SettingsManager {
             candidate[currentKey] := currentValue
         for key, value in changes
             candidate[key] := value
+        ; Preserve the legacy width update contract by translating direct numeric
+        ; writes to the nearest supported launcher scale.
+        if changes.Has("panelWidth") && !changes.Has("launcherScale")
+            candidate.Delete("launcherScale")
         this.Warnings := []
         validated := this.Validate(candidate)
         this.Values := validated
@@ -295,6 +324,8 @@ class SettingsManager {
                 . FlatJson.Quote(values["openingMonitor"]) ",`n"
             . "  " FlatJson.Quote("openingPosition") ": "
                 . FlatJson.Quote(values["openingPosition"]) ",`n"
+            . "  " FlatJson.Quote("launcherScale") ": "
+                . FlatJson.Quote(values["launcherScale"]) ",`n"
             . "  " FlatJson.Quote("panelWidth") ": " values["panelWidth"] ",`n"
             . "  " FlatJson.Quote("alwaysOnTop") ": "
                 . boolean(values["alwaysOnTop"]) ",`n"

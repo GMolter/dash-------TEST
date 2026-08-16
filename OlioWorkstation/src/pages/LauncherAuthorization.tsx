@@ -133,7 +133,7 @@ export function LauncherAuthorization({
               <p className="mt-3 text-sm text-slate-400">Code <span className="font-mono font-semibold tracking-wider text-slate-100">{displayCode}</span></p>
               <p className="mt-1 text-sm text-slate-400">Expires {expiry}</p>
             </div>
-            <div className="flex gap-3 text-sm text-slate-300"><ShieldCheck className="mt-0.5 h-5 w-5 flex-none text-emerald-300" /><p>Approval creates one revocable device credential for connection status and read-only access to your private Quick Pastes. The launcher cannot create, edit, delete, reorder, favorite, or share them.</p></div>
+            <div className="flex gap-3 text-sm text-slate-300"><ShieldCheck className="mt-0.5 h-5 w-5 flex-none text-emerald-300" /><p>Approval creates one revocable device credential for connection status, read-only access to your private Quick Pastes, and—if you connected Google Calendar—today’s read-only schedule. The launcher cannot create, edit, delete, reorder, favorite, or share your data.</p></div>
             <p className="text-sm text-amber-200">Approve only if this device name and code match the launcher in front of you.</p>
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
               <button type="button" disabled={busy} onClick={() => void decide('deny')} className="flex-1 rounded-lg border border-slate-600 px-4 py-3 font-medium hover:bg-slate-800 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300"><X className="mr-2 inline h-4 w-4" />Deny</button>
