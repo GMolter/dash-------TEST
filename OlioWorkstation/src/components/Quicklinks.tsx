@@ -1,6 +1,21 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, Plus, Trash2, GripVertical, Pencil, Folder } from 'lucide-react';
+import {
+  ArrowRight,
+  Check,
+  ChevronDown,
+  Folder,
+  FolderOpen,
+  Globe2,
+  GripVertical,
+  Layers3,
+  Link2,
+  Pencil,
+  Plus,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useOrg } from '../hooks/useOrg';
 import { useAuth } from '../hooks/useAuth';
@@ -202,7 +217,7 @@ export function Quicklinks({ editMode = false, collection = 'personal' }: Props)
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    if (!expandedFolderId) return;
+    if (!expandedFolderId || editMode) return;
 
     const prevBodyOverflow = document.body.style.overflow;
     const prevHtmlOverflow = document.documentElement.style.overflow;
@@ -212,7 +227,7 @@ export function Quicklinks({ editMode = false, collection = 'personal' }: Props)
       document.body.style.overflow = prevBodyOverflow;
       document.documentElement.style.overflow = prevHtmlOverflow;
     };
-  }, [expandedFolderId, isMobileFolderView]);
+  }, [editMode, expandedFolderId, isMobileFolderView]);
 
   const loadLinks = async () => {
     const { data, error } = await supabase.from('quicklinks').select('*').order('order_index', { ascending: true });
@@ -249,6 +264,14 @@ export function Quicklinks({ editMode = false, collection = 'personal' }: Props)
       const u = new URL(formatUrl(rawUrl));
       return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(u.hostname)}&sz=64`;
     } catch { return ''; }
+  };
+
+  const hostnameFor = (rawUrl: string) => {
+    try {
+      return new URL(formatUrl(rawUrl)).hostname.replace(/^www\./, '');
+    } catch {
+      return rawUrl || 'No URL';
+    }
   };
 
   // ── FolderIcon ────────────────────────────────────────────────────────────────
@@ -394,11 +417,11 @@ export function Quicklinks({ editMode = false, collection = 'personal' }: Props)
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const relX = (e.clientX - rect.left) / rect.width;
-    if (dragging?.itemType === 'link' && targetItemType === 'folder' && relX > 0.25 && relX < 0.75) {
+    const relY = (e.clientY - rect.top) / rect.height;
+    if (dragging?.itemType === 'link' && targetItemType === 'folder' && relY > 0.25 && relY < 0.75) {
       setDropTarget({ id, side: 'into' });
     } else {
-      setDropTarget({ id, side: relX < 0.5 ? 'before' : 'after' });
+      setDropTarget({ id, side: relY < 0.5 ? 'before' : 'after' });
     }
   };
 
@@ -617,336 +640,436 @@ export function Quicklinks({ editMode = false, collection = 'personal' }: Props)
   }
 
   // ── Edit mode ─────────────────────────────────────────────────────────────────
-  return (
-    <div className="glass-panel rounded-[1.75rem] p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-semibold text-white mb-1">
-            {collection === 'shared' ? 'Shared Quick Links' : 'Personal Quick Links'}
-          </h2>
-          <p className="text-sm text-slate-400">
-            {collection === 'shared'
-              ? 'Links added here are available to everyone in your organization · Click pencil to edit'
-              : 'Drag to reorder · Drag a link onto a folder to move it in · Click pencil to edit'}
-            {savingOrder ? ' · Saving…' : ''}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {collection === 'personal' && (
-            <button
-              onClick={() => { resetFolderForm(); setShowFolderForm(true); }}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white font-medium transition-colors"
-            >
-              <Folder className="w-4 h-4" />
-              Add Folder
-            </button>
-          )}
-          <button
-            onClick={() => setShowForm(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors"
+  const draftLink: Quicklink = {
+    id: 'draft',
+    title: title || 'Untitled link',
+    url: url || 'example.com',
+    icon: icon || '🔗',
+    order_index: 0,
+    scope: collection,
+    user_id: user?.id || '',
+    folder_id: linkFolderId || null,
+  };
+
+  const editorOverlay = (showForm || showFolderForm) && typeof document !== 'undefined'
+    ? createPortal(
+        <div className="fixed inset-0 z-[180] flex justify-end bg-slate-950/72 backdrop-blur-sm">
+          <aside
+            aria-modal="true"
+            aria-label={showFolderForm ? (editingFolder ? 'Edit folder' : 'Add folder') : (editingLink ? 'Edit link' : 'Add link')}
+            role="dialog"
+            className="ql-editor-open flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950/95 shadow-[-32px_0_90px_rgba(2,6,23,0.72)]"
           >
-            <Plus className="w-4 h-4" />
-            Add Link
-          </button>
-        </div>
-      </div>
-
-      {/* Folder form */}
-      {collection === 'personal' && showFolderForm && (
-        <div className="mb-6 p-6 bg-slate-900/50 rounded-lg border border-slate-700">
-          <h3 className="text-lg font-semibold text-white mb-4">{editingFolder ? 'Edit Folder' : 'Add New Folder'}</h3>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm text-slate-300 mb-2">Icon</label>
-              <div className="flex gap-2 items-center">
-                <span className="w-10 flex items-center justify-center shrink-0"><FolderIcon icon={folderIcon} size={32} /></span>
-                <input
-                  type="text"
-                  placeholder="emoji or https://…"
-                  value={folderIcon}
-                  onChange={(e) => setFolderIcon(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowIconPicker((v) => !v)}
-                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0 ${showIconPicker ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
-                >
-                  Pick
-                </button>
-              </div>
-              {showIconPicker && (
-                <div className="mt-2 p-3 bg-slate-900 border border-slate-700 rounded-xl">
-                  <div className="grid grid-cols-10 gap-1">
-                    {FOLDER_ICONS.map((ic) => (
-                      <button
-                        key={ic}
-                        type="button"
-                        onClick={() => { setFolderIcon(ic); setShowIconPicker(false); }}
-                        className={`text-xl p-1.5 rounded-lg hover:bg-slate-700 transition-colors ${folderIcon === ic ? 'bg-blue-600/30 ring-1 ring-blue-500' : ''}`}
-                      >
-                        {ic}
-                      </button>
-                    ))}
-                  </div>
+            <div className="flex items-start justify-between gap-5 border-b border-white/10 px-5 py-5 sm:px-7 sm:py-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-indigo-300/20 bg-indigo-400/10 text-indigo-200">
+                  {showFolderForm ? <Folder className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
                 </div>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm text-slate-300 mb-2">Name</label>
-              <input type="text" placeholder="Folder Name" value={folderName} onChange={(e) => setFolderName(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={editingFolder ? updateFolder : addFolder}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors">
-                {editingFolder ? 'Update Folder' : 'Add Folder'}
-              </button>
-              <button onClick={resetFolderForm}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white font-medium transition-colors">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Link form */}
-      {showForm && (
-        <div className="mb-6 p-6 bg-slate-900/50 rounded-lg border border-slate-700">
-          <h3 className="text-lg font-semibold text-white mb-4">{editingLink ? 'Edit Link' : 'Add New Link'}</h3>
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm text-slate-300 mb-2">Icon (emoji or image URL)</label>
-              <input type="text" placeholder="🔗  or  https://example.com/icon.png" value={icon} onChange={(e) => setIcon(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <p className="mt-2 text-xs text-slate-400">If you keep this as an emoji, Olio will try to show the site favicon automatically.</p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-300 mb-2">Title</label>
-              <input type="text" placeholder="Link Title" value={title} onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div>
-              <label className="block text-sm text-slate-300 mb-2">URL</label>
-              <input type="url" placeholder="https://example.com" value={url} onChange={(e) => setUrl(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            {collection === 'personal' && collectionFolders.length > 0 && (
-              <div>
-                <label className="block text-sm text-slate-300 mb-2">Folder</label>
-                <select value={linkFolderId} onChange={(e) => setLinkFolderId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">No folder (root)</option>
-                  {collectionFolders.map((f) => <option key={f.id} value={f.id}>{f.icon} {f.name}</option>)}
-                </select>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-300">
+                    {editingFolder || editingLink ? 'Editing existing item' : 'Create new item'}
+                  </p>
+                  <h3 className="mt-1 text-xl font-semibold tracking-tight text-white sm:text-2xl">
+                    {showFolderForm
+                      ? (editingFolder ? 'Edit folder' : 'Add a folder')
+                      : (editingLink ? 'Edit quick link' : 'Add a quick link')}
+                  </h3>
+                </div>
               </div>
-            )}
-            <div className="flex gap-2">
-              <button onClick={editingLink ? updateLink : addLink}
-                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors">
-                {editingLink ? 'Update Link' : 'Add Link'}
-              </button>
-              <button onClick={resetForm}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white font-medium transition-colors">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Unified grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {allGridItems.map((item) => {
-          const isDragging = dragging?.id === item.id;
-          const dt = dropTarget?.id === item.id && !isDragging ? dropTarget : null;
-          const isIntoTarget = dt?.side === 'into';
-          const dragClasses = [
-            isDragging ? 'opacity-40 scale-95' : '',
-            isIntoTarget ? 'ring-2 ring-green-400/70 bg-slate-700/80' : '',
-          ].join(' ');
-
-          if (item.itemType === 'folder') {
-            const folder = item.data;
-            const count = collectionLinks.filter((l) => l.folder_id === folder.id).length;
-            const folderLinks = collectionLinks.filter((l) => l.folder_id === folder.id);
-            const isExpanded = expandedFolderId === folder.id;
-            return (
-              <div
-                key={`folder-${folder.id}`}
-                className={`group relative rounded-xl p-6 border flex flex-col items-center ${isExpanded ? 'justify-start' : 'justify-center'} text-center transition-all bg-slate-900/50 hover:bg-slate-900/80 border-slate-700/50 ${dragClasses}`}
-                onDragOver={onDragOver(folder.id, 'folder')}
-                onDrop={onDropOn(folder.id, 'folder')}
+              <button
+                type="button"
+                onClick={showFolderForm ? resetFolderForm : resetForm}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.055] text-slate-300 transition hover:border-white/20 hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                aria-label="Close editor"
               >
-                <button
-                  draggable
-                  onDragStart={onDragStart(folder.id, 'folder')}
-                  onDragEnd={onDragEnd}
-                  className="absolute top-2 left-2 p-2 rounded-lg bg-slate-800/40 border border-slate-700/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
-                  title="Drag to reorder"
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="scrollbar-theme min-h-0 flex-1 overflow-y-auto px-5 py-6 sm:px-7">
+              {showFolderForm ? (
+                <form
+                  className="space-y-6"
+                  onSubmit={(e) => { e.preventDefault(); void (editingFolder ? updateFolder() : addFolder()); }}
                 >
-                  <GripVertical className="w-4 h-4 text-slate-300" />
-                </button>
-
-                {/* Insert line indicator */}
-                {dt && dt.side !== 'into' && (
-                  <div className={`absolute inset-y-2 w-0.5 rounded-full bg-blue-400 pointer-events-none ${dt.side === 'before' ? 'left-0' : 'right-0'}`} />
-                )}
-                {/* Drop-into hint */}
-                {isIntoTarget && (
-                  <div className="absolute inset-0 rounded-xl flex items-center justify-center bg-green-500/10 pointer-events-none">
-                    <span className="text-green-400 text-xs font-medium">Drop to add</span>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => setExpandedFolderId(isExpanded ? null : folder.id)}
-                  className="flex flex-col items-center w-full"
-                >
-                  <div className="mb-3"><FolderIcon icon={folder.icon} size={40} /></div>
-                  <h3 className="text-white font-medium mb-1">{folder.name}</h3>
-                  <p className="text-xs text-slate-500">{count} link{count !== 1 ? 's' : ''}</p>
-                </button>
-
-                {isExpanded && (
-                  <div className="w-full mt-3 pt-3 border-t border-slate-700/50 ql-folder-open">
-                    {folderLinks.length > 0 ? (
-                      <div className="w-full space-y-1">
-                        {folderLinks.sort((a, b) => a.order_index - b.order_index).map((link) => {
-                          const isItemDragging = draggingFolderItem === link.id;
-                          const isItemOver = dragOverFolderItemId === link.id && draggingFolderItem !== link.id;
-                          return (
-                            <div
-                              key={link.id}
-                              className={`flex items-center gap-2 px-2 py-1.5 bg-slate-800/60 rounded-lg transition-all ${isItemDragging ? 'opacity-40' : ''} ${isItemOver ? 'ring-1 ring-blue-500/60' : ''}`}
-                              onDragOver={onFolderItemDragOver(link.id)}
-                              onDrop={onFolderItemDrop(folder.id, link.id)}
-                            >
-                              <button
-                                draggable
-                                onDragStart={onFolderItemDragStart(link.id)}
-                                onDragEnd={onFolderItemDragEnd}
-                                className="cursor-grab active:cursor-grabbing shrink-0"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <GripVertical className="w-3 h-3 text-slate-500" />
-                              </button>
-                              <LinkIcon link={link} size={18} />
-                              <span className="text-white text-xs flex-1 truncate text-left">{link.title}</span>
-                              <button onClick={(e) => { e.stopPropagation(); startEditLink(link); }} className="p-1 bg-blue-600 hover:bg-blue-700 rounded transition-colors shrink-0">
-                                <Pencil className="w-3 h-3 text-white" />
-                              </button>
-                              <button onClick={(e) => { e.stopPropagation(); setLinkToDelete(link); }} className="p-1 bg-red-600 hover:bg-red-700 rounded transition-colors shrink-0">
-                                <Trash2 className="w-3 h-3 text-white" />
-                              </button>
-                            </div>
-                          );
-                        })}
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-5">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Preview</p>
+                    <div className="mt-4 flex items-center gap-4">
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-amber-300/15 bg-amber-300/[0.07]">
+                        <FolderIcon icon={folderIcon} size={38} />
                       </div>
-                    ) : (
-                      <p className="text-slate-500 text-xs text-center py-2">No links in this folder</p>
-                    )}
+                      <div className="min-w-0">
+                        <p className="truncate text-lg font-semibold text-white">{folderName || 'Untitled folder'}</p>
+                        <p className="mt-1 text-sm text-slate-400">Folder · 0 links</p>
+                      </div>
+                    </div>
                   </div>
-                )}
 
-                <div className="flex gap-2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => startEditFolder(folder)} className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-                    <Pencil className="w-4 h-4 text-white" />
-                  </button>
-                  <button onClick={() => setFolderToDelete(folder)} className="p-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
-                    <Trash2 className="w-4 h-4 text-white" />
-                  </button>
-                </div>
-              </div>
-            );
-          }
+                  <div>
+                    <label htmlFor="quicklink-folder-name" className="mb-2 block text-sm font-medium text-slate-200">Folder name</label>
+                    <input
+                      id="quicklink-folder-name"
+                      type="text"
+                      placeholder="e.g. Design tools"
+                      value={folderName}
+                      onChange={(e) => setFolderName(e.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 text-white outline-none placeholder:text-slate-600 focus:border-indigo-400/70 focus:ring-4 focus:ring-indigo-500/10"
+                    />
+                  </div>
 
-          const link = item.data;
-          const inFolder = collectionFolders.find((f) => f.id === link.folder_id);
-          const canEditLink = collection === 'personal' || link.user_id === user?.id || canManageOrg();
-          return (
-            <div
-              key={`link-${link.id}`}
-              className={`${tileBase} bg-slate-900/50 hover:bg-slate-900/80 border-slate-700/50 ${dragClasses}`}
-              onDragOver={collection === 'personal' ? onDragOver(link.id, 'link') : undefined}
-              onDrop={collection === 'personal' ? onDropOn(link.id, 'link') : undefined}
-            >
-              {dt && dt.side !== 'into' && (
-                <div className={`absolute inset-y-2 w-0.5 rounded-full bg-blue-400 pointer-events-none ${dt.side === 'before' ? 'left-0' : 'right-0'}`} />
-              )}
-              {collection === 'personal' && (
-                <button
-                  draggable
-                  onDragStart={onDragStart(link.id, 'link')}
-                  onDragEnd={onDragEnd}
-                  className="absolute top-2 left-2 p-2 rounded-lg bg-slate-800/40 border border-slate-700/50 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing"
-                  title="Drag to reorder"
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <label htmlFor="quicklink-folder-icon" className="text-sm font-medium text-slate-200">Folder icon</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowIconPicker((value) => !value)}
+                        className="text-xs font-medium text-indigo-300 transition hover:text-indigo-200"
+                      >
+                        {showIconPicker ? 'Hide icon choices' : 'Choose an icon'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-slate-900/80">
+                        <FolderIcon icon={folderIcon} size={28} />
+                      </span>
+                      <input
+                        id="quicklink-folder-icon"
+                        type="text"
+                        placeholder="Emoji or image URL"
+                        value={folderIcon}
+                        onChange={(e) => setFolderIcon(e.target.value)}
+                        className="h-12 min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-900/80 px-4 text-white outline-none placeholder:text-slate-600 focus:border-indigo-400/70 focus:ring-4 focus:ring-indigo-500/10"
+                      />
+                    </div>
+                    {showIconPicker && (
+                      <div className="ql-folder-open mt-3 rounded-2xl border border-white/10 bg-slate-900/80 p-3">
+                        <div className="grid grid-cols-8 gap-1 sm:grid-cols-10">
+                          {FOLDER_ICONS.map((folderIconOption) => (
+                            <button
+                              key={folderIconOption}
+                              type="button"
+                              onClick={() => { setFolderIcon(folderIconOption); setShowIconPicker(false); }}
+                              className={`flex aspect-square items-center justify-center rounded-lg text-xl transition hover:bg-white/10 ${folderIcon === folderIconOption ? 'bg-indigo-500/20 ring-1 ring-indigo-400/60' : ''}`}
+                              aria-label={`Use ${folderIconOption} icon`}
+                            >
+                              {folderIconOption}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">Use an emoji or paste a direct image URL.</p>
+                  </div>
+
+                  <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-6 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={resetFolderForm}
+                      className="h-11 rounded-xl border border-white/10 bg-white/[0.04] px-5 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.08] hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!folderName.trim()}
+                      className="flex h-11 items-center justify-center gap-2 rounded-xl bg-indigo-500 px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(79,70,229,0.3)] transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Check className="h-4 w-4" />
+                      {editingFolder ? 'Save changes' : 'Create folder'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <form
+                  className="space-y-6"
+                  onSubmit={(e) => { e.preventDefault(); void (editingLink ? updateLink() : addLink()); }}
                 >
-                  <GripVertical className="w-4 h-4 text-slate-300" />
-                </button>
-              )}
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-5">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Preview</p>
+                    <div className="mt-4 flex items-center gap-4">
+                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border border-indigo-300/15 bg-indigo-300/[0.07]">
+                        <LinkIcon link={draftLink} size={38} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate text-lg font-semibold text-white">{title || 'Untitled link'}</p>
+                        <p className="mt-1 truncate text-sm text-slate-400">{hostnameFor(url || 'example.com')}</p>
+                      </div>
+                    </div>
+                  </div>
 
-              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-end gap-1">
-                {inFolder && <span className="px-2 py-1 bg-slate-600/30 text-slate-400 text-xs rounded border border-slate-600/30">{inFolder.icon} {inFolder.name}</span>}
-              </div>
+                  <div>
+                    <label htmlFor="quicklink-title" className="mb-2 block text-sm font-medium text-slate-200">Title</label>
+                    <input
+                      id="quicklink-title"
+                      type="text"
+                      placeholder="e.g. Team Figma"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 text-white outline-none placeholder:text-slate-600 focus:border-indigo-400/70 focus:ring-4 focus:ring-indigo-500/10"
+                    />
+                  </div>
 
-              <div className="mb-3"><LinkIcon link={link} size={42} /></div>
-              <h3 className="text-white font-medium mb-3">{link.title}</h3>
+                  <div>
+                    <label htmlFor="quicklink-url" className="mb-2 block text-sm font-medium text-slate-200">URL</label>
+                    <div className="relative">
+                      <Globe2 className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                      <input
+                        id="quicklink-url"
+                        type="url"
+                        placeholder="https://example.com"
+                        value={url}
+                        onChange={(e) => setUrl(e.target.value)}
+                        className="h-12 w-full rounded-xl border border-white/10 bg-slate-900/80 pl-11 pr-4 text-white outline-none placeholder:text-slate-600 focus:border-indigo-400/70 focus:ring-4 focus:ring-indigo-500/10"
+                      />
+                    </div>
+                  </div>
 
-              {canEditLink && (
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => startEditLink(link)} className="p-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
-                    <Pencil className="w-4 h-4 text-white" />
-                  </button>
-                  <button onClick={() => setLinkToDelete(link)} className="p-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors">
-                    <Trash2 className="w-4 h-4 text-white" />
-                  </button>
-                </div>
+                  <div>
+                    <label htmlFor="quicklink-icon" className="mb-2 block text-sm font-medium text-slate-200">Icon</label>
+                    <input
+                      id="quicklink-icon"
+                      type="text"
+                      placeholder="Emoji or image URL"
+                      value={icon}
+                      onChange={(e) => setIcon(e.target.value)}
+                      className="h-12 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 text-white outline-none placeholder:text-slate-600 focus:border-indigo-400/70 focus:ring-4 focus:ring-indigo-500/10"
+                    />
+                    <p className="mt-2 text-xs leading-relaxed text-slate-500">Keep an emoji here and Olio will try the website favicon first.</p>
+                  </div>
+
+                  {collection === 'personal' && collectionFolders.length > 0 && (
+                    <div>
+                      <label htmlFor="quicklink-folder" className="mb-2 block text-sm font-medium text-slate-200">Folder</label>
+                      <select
+                        id="quicklink-folder"
+                        value={linkFolderId}
+                        onChange={(e) => setLinkFolderId(e.target.value)}
+                        className="h-12 w-full rounded-xl border border-white/10 bg-slate-900/80 px-4 text-white outline-none focus:border-indigo-400/70 focus:ring-4 focus:ring-indigo-500/10"
+                      >
+                        <option value="">No folder (root)</option>
+                        {collectionFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.icon} {folder.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col-reverse gap-3 border-t border-white/10 pt-6 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={resetForm}
+                      className="h-11 rounded-xl border border-white/10 bg-white/[0.04] px-5 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.08] hover:text-white"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!title.trim() || !url.trim()}
+                      className="flex h-11 items-center justify-center gap-2 rounded-xl bg-indigo-500 px-5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(79,70,229,0.3)] transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Check className="h-4 w-4" />
+                      {editingLink ? 'Save changes' : 'Create link'}
+                    </button>
+                  </div>
+                </form>
               )}
             </div>
-          );
-        })}
+          </aside>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  const linkDeleteModal = linkToDelete && typeof document !== 'undefined'
+    ? createPortal(
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/80 px-4 backdrop-blur-md">
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-link-title" className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-[0_32px_100px_rgba(2,6,23,0.82)] sm:p-7">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-400/20 bg-rose-400/10 text-rose-300">
+              <Trash2 className="h-5 w-5" />
+            </div>
+            <h3 id="delete-link-title" className="mt-5 text-xl font-semibold text-white">Delete this quick link?</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">“{linkToDelete.title}” will be permanently removed. This can’t be undone.</p>
+            <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button onClick={() => setLinkToDelete(null)} className="h-11 rounded-xl border border-white/10 px-5 text-sm font-semibold text-slate-300 transition hover:bg-white/[0.06] hover:text-white">Keep link</button>
+              <button onClick={deleteLink} className="h-11 rounded-xl bg-rose-500 px-5 text-sm font-semibold text-white transition hover:bg-rose-400">Delete link</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  const folderDeleteModal = folderToDelete && typeof document !== 'undefined'
+    ? createPortal(
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/80 px-4 backdrop-blur-md">
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-folder-title" className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-950 p-6 shadow-[0_32px_100px_rgba(2,6,23,0.82)] sm:p-7">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-300/15 bg-amber-300/[0.07]">
+              <FolderIcon icon={folderToDelete.icon} size={32} />
+            </div>
+            <h3 id="delete-folder-title" className="mt-5 text-xl font-semibold text-white">Delete “{folderToDelete.name}”?</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">Choose what should happen to the links currently inside this folder.</p>
+            <div className="mt-7 space-y-3">
+              <button onClick={() => deleteFolder('root')} className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/[0.045] px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-white/[0.08]">
+                Move links to root
+                <ArrowRight className="h-4 w-4 text-slate-400" />
+              </button>
+              <button onClick={() => deleteFolder('delete')} className="w-full rounded-xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-left text-sm font-semibold text-rose-200 transition hover:bg-rose-400/15">Delete folder and all links</button>
+              <button onClick={() => setFolderToDelete(null)} className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-slate-400 transition hover:bg-white/[0.05] hover:text-white">Cancel</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <section className="mx-auto w-full max-w-[88rem]" aria-labelledby="quicklinks-management-title">
+      <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/55 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_24px_70px_rgba(2,6,23,0.3)] backdrop-blur-xl">
+        <header className="flex flex-col gap-4 border-b border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-indigo-300/15 bg-indigo-400/10 text-indigo-200">
+              {collection === 'shared' ? <Users className="h-5 w-5" /> : <Link2 className="h-5 w-5" />}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h2 id="quicklinks-management-title" className="text-lg font-semibold tracking-tight text-white sm:text-xl">
+                  {collection === 'shared' ? 'Shared Quick Links' : 'Personal Quick Links'}
+                </h2>
+                <span className="text-xs text-slate-500">
+                  {collectionLinks.length} link{collectionLinks.length !== 1 ? 's' : ''}
+                  {collection === 'personal' ? ` · ${collectionFolders.length} folder${collectionFolders.length !== 1 ? 's' : ''}` : ''}
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-500">{collection === 'shared' ? 'Organization library' : 'Your bookmark library'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {collection === 'personal' && (
+              <button onClick={() => { resetFolderForm(); setShowFolderForm(true); }} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.045] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08] sm:flex-none" aria-label="New folder">
+                <Folder className="h-3.5 w-3.5" /> Folder
+              </button>
+            )}
+            <button onClick={() => setShowForm(true)} className="flex h-9 flex-1 items-center justify-center gap-2 rounded-lg bg-indigo-500 px-3.5 text-xs font-semibold text-white transition hover:bg-indigo-400 sm:flex-none" aria-label="New link">
+              <Plus className="h-3.5 w-3.5" /> Link
+            </button>
+          </div>
+        </header>
+
+        <div className="flex flex-col gap-1 border-b border-white/[0.07] bg-white/[0.018] px-4 py-2 text-[11px] text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          {collection === 'personal' ? (
+            <span className="flex items-center gap-1.5"><GripVertical className="h-3.5 w-3.5 text-indigo-300" /> Drag the handle to reorder items. Drop a link onto a folder to organize it.</span>
+          ) : (
+            <span>Links here are available to everyone in the organization.</span>
+          )}
+          <span className={savingOrder ? 'font-medium text-indigo-200' : ''}>{savingOrder ? 'Saving order…' : collection === 'personal' ? 'Changes save automatically' : 'Everyone'}</span>
+        </div>
+
+        {allGridItems.length > 0 ? (
+          <div>
+            <div className="hidden grid-cols-[2.5rem_2.75rem_minmax(0,1fr)_7rem_7rem_5.5rem] items-center gap-3 border-b border-white/[0.07] bg-slate-950/35 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 md:grid sm:px-5">
+              <span />
+              <span />
+              <span>Name</span>
+              <span>Type</span>
+              <span>Location</span>
+              <span className="text-right">Actions</span>
+            </div>
+            <div className="divide-y divide-white/[0.065]">
+              {allGridItems.map((item) => {
+                const isDragging = dragging?.id === item.id;
+                const dt = dropTarget?.id === item.id && !isDragging ? dropTarget : null;
+                const isIntoTarget = dt?.side === 'into';
+
+                if (item.itemType === 'folder') {
+                  const folder = item.data;
+                  const folderLinks = collectionLinks.filter((link) => link.folder_id === folder.id).sort((a, b) => a.order_index - b.order_index);
+                  const isExpanded = expandedFolderId === folder.id;
+                  return (
+                    <article key={`folder-${folder.id}`} className={`relative transition ${isDragging ? 'opacity-40' : ''} ${isIntoTarget ? 'bg-emerald-400/[0.08] ring-1 ring-inset ring-emerald-400/35' : ''}`} onDragOver={onDragOver(folder.id, 'folder')} onDrop={onDropOn(folder.id, 'folder')}>
+                      {dt && dt.side !== 'into' && <div className={`pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-indigo-400 ${dt.side === 'before' ? 'top-0' : 'bottom-0'}`} />}
+                      <div className="grid min-h-[4.5rem] grid-cols-[2.25rem_2.5rem_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 transition hover:bg-white/[0.025] sm:px-5 md:grid-cols-[2.5rem_2.75rem_minmax(0,1fr)_7rem_7rem_5.5rem] md:gap-3">
+                        <button draggable onDragStart={onDragStart(folder.id, 'folder')} onDragEnd={onDragEnd} className="flex h-8 w-8 cursor-grab items-center justify-center rounded-md text-slate-600 transition hover:bg-white/[0.06] hover:text-slate-300 active:cursor-grabbing" title="Drag to reorder" aria-label={`Reorder ${folder.name}`}>
+                          <GripVertical className="h-4 w-4" />
+                        </button>
+                        <button onClick={() => setExpandedFolderId(isExpanded ? null : folder.id)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-amber-300/10 bg-amber-300/[0.055]" aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${folder.name}`}>
+                          <FolderIcon icon={folder.icon} size={24} />
+                        </button>
+                        <button onClick={() => setExpandedFolderId(isExpanded ? null : folder.id)} className="min-w-0 text-left">
+                          <span className="flex items-center gap-2">
+                            <span className="truncate text-sm font-semibold text-white">{folder.name}</span>
+                            <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          </span>
+                          <span className="mt-0.5 block text-xs text-slate-500">{folderLinks.length} link{folderLinks.length !== 1 ? 's' : ''}</span>
+                        </button>
+                        <span className="hidden text-xs text-amber-200/75 md:block">Folder</span>
+                        <span className="hidden text-xs text-slate-500 md:block">Root</span>
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => startEditFolder(folder)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-indigo-400/10 hover:text-indigo-200" aria-label={`Edit ${folder.name}`}><Pencil className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => setFolderToDelete(folder)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-rose-400/10 hover:text-rose-300" aria-label={`Delete ${folder.name}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </div>
+                      {isIntoTarget && <div className="pointer-events-none absolute right-24 top-1/2 -translate-y-1/2 rounded-md border border-emerald-300/20 bg-emerald-950 px-2 py-1 text-[10px] font-semibold text-emerald-200">Move into folder</div>}
+                      {isExpanded && (
+                        <div className="ql-folder-open border-t border-white/[0.055] bg-slate-950/38 py-1 pl-5 pr-3 sm:pl-14 sm:pr-5">
+                          {folderLinks.length > 0 ? folderLinks.map((link) => {
+                            const isItemDragging = draggingFolderItem === link.id;
+                            const isItemOver = dragOverFolderItemId === link.id && draggingFolderItem !== link.id;
+                            return (
+                              <div key={link.id} className={`grid min-h-[3.25rem] grid-cols-[1.75rem_2.25rem_minmax(0,1fr)_auto] items-center gap-2 rounded-lg px-2 transition hover:bg-white/[0.035] md:grid-cols-[1.75rem_2.25rem_minmax(0,1fr)_7rem_7rem_5.5rem] ${isItemDragging ? 'opacity-40' : ''} ${isItemOver ? 'bg-indigo-400/[0.08] ring-1 ring-inset ring-indigo-400/30' : ''}`} onDragOver={onFolderItemDragOver(link.id)} onDrop={onFolderItemDrop(folder.id, link.id)}>
+                                <button draggable onDragStart={onFolderItemDragStart(link.id)} onDragEnd={onFolderItemDragEnd} className="cursor-grab text-slate-700 hover:text-slate-400 active:cursor-grabbing" aria-label={`Reorder ${link.title}`}><GripVertical className="h-3.5 w-3.5" /></button>
+                                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-white/[0.045]"><LinkIcon link={link} size={18} /></span>
+                                <div className="min-w-0"><p className="truncate text-xs font-medium text-slate-200">{link.title}</p><p className="truncate text-[10px] text-slate-600">{hostnameFor(link.url)}</p></div>
+                                <span className="hidden text-[11px] text-slate-600 md:block">Link</span>
+                                <span className="hidden truncate text-[11px] text-slate-600 md:block">{folder.name}</span>
+                                <div className="flex justify-end gap-1">
+                                  <button onClick={() => startEditLink(link)} className="flex h-7 w-7 items-center justify-center rounded-md text-slate-600 hover:bg-indigo-400/10 hover:text-indigo-200" aria-label={`Edit ${link.title}`}><Pencil className="h-3 w-3" /></button>
+                                  <button onClick={() => setLinkToDelete(link)} className="flex h-7 w-7 items-center justify-center rounded-md text-slate-700 hover:bg-rose-400/10 hover:text-rose-300" aria-label={`Delete ${link.title}`}><Trash2 className="h-3 w-3" /></button>
+                                </div>
+                              </div>
+                            );
+                          }) : <div className="flex items-center gap-2 px-2 py-3 text-xs text-slate-600"><FolderOpen className="h-3.5 w-3.5" /> Empty folder</div>}
+                        </div>
+                      )}
+                    </article>
+                  );
+                }
+
+                const link = item.data;
+                const canEditLink = collection === 'personal' || link.user_id === user?.id || canManageOrg();
+                return (
+                  <article key={`link-${link.id}`} className={`relative transition hover:bg-white/[0.025] ${isDragging ? 'opacity-40' : ''}`} onDragOver={collection === 'personal' ? onDragOver(link.id, 'link') : undefined} onDrop={collection === 'personal' ? onDropOn(link.id, 'link') : undefined}>
+                    {dt && dt.side !== 'into' && <div className={`pointer-events-none absolute inset-x-2 z-10 h-0.5 rounded-full bg-indigo-400 ${dt.side === 'before' ? 'top-0' : 'bottom-0'}`} />}
+                    <div className="grid min-h-[4.5rem] grid-cols-[2.25rem_2.5rem_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 sm:px-5 md:grid-cols-[2.5rem_2.75rem_minmax(0,1fr)_7rem_7rem_5.5rem] md:gap-3">
+                      {collection === 'personal' ? (
+                        <button draggable onDragStart={onDragStart(link.id, 'link')} onDragEnd={onDragEnd} className="flex h-8 w-8 cursor-grab items-center justify-center rounded-md text-slate-600 transition hover:bg-white/[0.06] hover:text-slate-300 active:cursor-grabbing" title="Drag to reorder" aria-label={`Reorder ${link.title}`}><GripVertical className="h-4 w-4" /></button>
+                      ) : <span />}
+                      <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-indigo-300/10 bg-indigo-300/[0.05]"><LinkIcon link={link} size={24} /></span>
+                      <div className="min-w-0"><h3 className="truncate text-sm font-semibold text-white">{link.title}</h3><p className="mt-0.5 flex items-center gap-1 truncate text-xs text-slate-500"><Globe2 className="h-3 w-3 shrink-0" /> {hostnameFor(link.url)}</p></div>
+                      <span className="hidden text-xs text-indigo-200/70 md:block">Link</span>
+                      <span className="hidden text-xs text-slate-500 md:block">Root</span>
+                      <div className="flex items-center justify-end gap-1">
+                        {canEditLink ? <>
+                          <button onClick={() => startEditLink(link)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-indigo-400/10 hover:text-indigo-200" aria-label={`Edit ${link.title}`}><Pencil className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => setLinkToDelete(link)} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-600 transition hover:bg-rose-400/10 hover:text-rose-300" aria-label={`Delete ${link.title}`}><Trash2 className="h-3.5 w-3.5" /></button>
+                        </> : <span className="text-[10px] text-slate-600">View only</span>}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="flex min-h-[15rem] flex-col items-center justify-center px-6 text-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-indigo-300/15 bg-indigo-300/[0.07] text-indigo-200"><Layers3 className="h-5 w-5" /></div>
+            <h3 className="mt-4 text-base font-semibold text-white">No quick links yet</h3>
+            <p className="mt-1 text-sm text-slate-500">Add a link to begin.</p>
+            <button onClick={() => setShowForm(true)} className="mt-4 flex h-9 items-center gap-2 rounded-lg bg-indigo-500 px-4 text-xs font-semibold text-white hover:bg-indigo-400"><Plus className="h-3.5 w-3.5" /> New link</button>
+          </div>
+        )}
       </div>
 
-      {allGridItems.length === 0 && !showForm && !showFolderForm && (
-        <p className="text-slate-400 text-center py-12">No quick links yet. Add one to get started!</p>
-      )}
-
-      {/* Delete link modal */}
-      {linkToDelete && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 max-w-md w-full mx-4">
-            <div className="text-center mb-6">
-              <div className="text-5xl mb-4">⚠️</div>
-              <h3 className="text-xl font-semibold text-white mb-2">Delete Quick Link?</h3>
-              <p className="text-slate-400">Are you sure you want to delete "{linkToDelete.title}"? This action cannot be undone.</p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setLinkToDelete(null)} className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white font-medium transition-colors">Cancel</button>
-              <button onClick={deleteLink} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-medium transition-colors">Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete folder modal */}
-      {folderToDelete && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 max-w-md w-full mx-4">
-            <div className="text-center mb-6">
-              <div className="text-5xl mb-4">{folderToDelete.icon}</div>
-              <h3 className="text-xl font-semibold text-white mb-2">Delete Folder?</h3>
-              <p className="text-slate-400">What should happen to the links inside "{folderToDelete.name}"?</p>
-            </div>
-            <div className="flex flex-col gap-3">
-              <button onClick={() => deleteFolder('root')} className="w-full px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white font-medium transition-colors">Move links to root</button>
-              <button onClick={() => deleteFolder('delete')} className="w-full px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-white font-medium transition-colors">Delete folder and all links</button>
-              <button onClick={() => setFolderToDelete(null)} className="w-full px-4 py-2 bg-transparent hover:bg-slate-700 rounded-lg text-slate-400 font-medium transition-colors">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      {editorOverlay}
+      {linkDeleteModal}
+      {folderDeleteModal}
+    </section>
   );
 }

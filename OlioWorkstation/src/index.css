@@ -40,6 +40,14 @@
   animation: ql-folder-focus 0.22s ease-out forwards;
 }
 
+@keyframes ql-editor-open {
+  from { opacity: 0; transform: translateX(28px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.ql-editor-open {
+  animation: ql-editor-open 0.22s ease-out forwards;
+}
+
 @keyframes todo-drawer-open {
   from { opacity: 0; transform: translateX(36px); }
   to   { opacity: 1; transform: translateX(0); }
