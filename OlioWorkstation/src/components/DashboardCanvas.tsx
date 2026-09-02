@@ -1,6 +1,7 @@
 import { KeyboardEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Clipboard, EyeOff, Grid2X2, LayoutGrid, Link2, Maximize2, Plus, QrCode, Redo2, RotateCcw, Undo2, X } from 'lucide-react';
-import { DashboardLayoutItem, DashboardQuicklink, useFreeformDashboard } from '../hooks/useFreeformDashboard';
+import { createPortal } from 'react-dom';
+import { ArrowRight, Clipboard, EyeOff, Folder, Grid2X2, LayoutGrid, Link2, Maximize2, Plus, QrCode, Redo2, RotateCcw, Undo2, X } from 'lucide-react';
+import { DashboardLayoutItem, DashboardQuicklink, DashboardQuicklinkFolder, useFreeformDashboard } from '../hooks/useFreeformDashboard';
 import { useDashboardConfiguration } from '../hooks/useDashboardConfiguration';
 import { ClassDashWidget } from './ClassDashWidget';
 import { DashboardTodosHomeHeader } from './DashboardTodos';
@@ -11,13 +12,14 @@ const ROW_HEIGHT = 68;
 
 type CanvasItem = {
   id: string;
-  kind: 'classdash' | 'quicklink' | 'shortcut';
+  kind: 'classdash' | 'folder' | 'quicklink' | 'shortcut';
   title: string;
   minWidth: number;
   minHeight: number;
   defaultWidth: number;
   defaultHeight: number;
   quicklink?: DashboardQuicklink;
+  folder?: DashboardQuicklinkFolder;
   shortcut?: 'qr' | 'quick-pastes' | 'utilities';
 };
 
@@ -130,6 +132,21 @@ function QuicklinkCard({ link }: { link: DashboardQuicklink }) {
   );
 }
 
+function FolderIcon({ folder }: { folder: DashboardQuicklinkFolder }) {
+  if (folder.icon && folder.icon !== 'folder') return <span className="text-4xl leading-none">{folder.icon}</span>;
+  return <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-400/10"><Folder className="h-7 w-7 text-violet-200" /></span>;
+}
+
+function FolderCard({ folder, linkCount, onOpen }: { folder: DashboardQuicklinkFolder; linkCount: number; onOpen: () => void }) {
+  return (
+    <button type="button" onClick={onOpen} className="glass-panel group flex h-full w-full flex-col items-center justify-center overflow-hidden rounded-[1.5rem] p-4 text-center transition hover:border-violet-300/35 hover:bg-slate-900/55">
+      <FolderIcon folder={folder} />
+      <div className="mt-3 flex max-w-full items-center gap-1.5 text-sm font-semibold text-white"><span className="truncate">{folder.name}</span><ArrowRight className="h-3.5 w-3.5 shrink-0 text-violet-300 transition-transform group-hover:translate-x-0.5" /></div>
+      <div className="mt-1 text-[11px] uppercase tracking-wider text-violet-300">{linkCount} {linkCount === 1 ? 'link' : 'links'}</div>
+    </button>
+  );
+}
+
 const SHORTCUTS = {
   qr: { label: 'QR Generator', icon: QrCode },
   'quick-pastes': { label: 'Quick Pastes', icon: Clipboard },
@@ -144,7 +161,7 @@ function ShortcutCard({ shortcut, onNavigate, onOpenTool }: { shortcut: keyof ty
 
 export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTool }: { editing: boolean; onEditingChange: (editing: boolean) => void; onNavigate: (path: string) => void; onOpenTool: (tool: string) => void }) {
   const { modules, syncing, error, updateModule, resetLayout } = useDashboardConfiguration();
-  const { layouts: storedLayouts, quicklinks, loading, warning, saveLayouts } = useFreeformDashboard();
+  const { layouts: storedLayouts, quicklinks, folders, loading, warning, saveLayouts } = useFreeformDashboard();
   const [workingLayouts, setWorkingLayouts] = useState<Record<string, DashboardLayoutItem>>({});
   const [interaction, setInteraction] = useState<Interaction | null>(null);
   const interactionRef = useRef<Interaction | null>(null);
@@ -153,6 +170,7 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
   const [redoStack, setRedoStack] = useState<DashboardLayoutItem[][]>([]);
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(1200);
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
 
   const classdashModule = modules.find((module) => module.id === 'classdash');
   const quicklinksModule = modules.find((module) => module.id === 'quicklinks');
@@ -161,11 +179,12 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
 
   const items = useMemo<CanvasItem[]>(() => {
     const next: CanvasItem[] = [];
-    if (classdashModule?.available) next.push({ id: 'plugin:classdash', kind: 'classdash', title: 'ClassDash', minWidth: 6, minHeight: 4, defaultWidth: 12, defaultHeight: 4 });
-    quicklinks.forEach((link) => next.push({ id: `quicklink:${link.id}`, kind: 'quicklink', title: link.title, minWidth: 2, minHeight: 2, defaultWidth: 3, defaultHeight: 3, quicklink: link }));
+    if (classdashModule?.available) next.push({ id: 'plugin:classdash', kind: 'classdash', title: 'ClassDash', minWidth: 6, minHeight: 3, defaultWidth: 12, defaultHeight: 3 });
+    quicklinks.filter((link) => !link.folder_id).forEach((link) => next.push({ id: `quicklink:${link.id}`, kind: 'quicklink', title: link.title, minWidth: 2, minHeight: 2, defaultWidth: 3, defaultHeight: 3, quicklink: link }));
+    folders.forEach((folder) => next.push({ id: `folder:${folder.id}`, kind: 'folder', title: folder.name, minWidth: 2, minHeight: 2, defaultWidth: 3, defaultHeight: 3, folder }));
     (Object.keys(SHORTCUTS) as Array<keyof typeof SHORTCUTS>).forEach((shortcut) => next.push({ id: `shortcut:${shortcut}`, kind: 'shortcut', title: SHORTCUTS[shortcut].label, minWidth: 2, minHeight: 2, defaultWidth: 4, defaultHeight: 2, shortcut }));
     return next;
-  }, [classdashModule?.available, quicklinks]);
+  }, [classdashModule?.available, folders, quicklinks]);
   useEffect(() => {
     if (interactionRef.current) return;
     setWorkingLayouts(mergeLayouts(items, storedLayouts));
@@ -181,7 +200,7 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
     return () => observer.disconnect();
   }, []);
 
-  const groupVisible = (item: CanvasItem) => item.kind === 'classdash' ? !!classdashModule?.enabled : item.kind === 'quicklink' ? !!quicklinksModule?.enabled : !!shortcutsModule?.enabled;
+  const groupVisible = (item: CanvasItem) => item.kind === 'classdash' ? !!classdashModule?.enabled : item.kind === 'quicklink' || item.kind === 'folder' ? !!quicklinksModule?.enabled : !!shortcutsModule?.enabled;
   const visibleItems = items.filter((item) => groupVisible(item) && !workingLayouts[item.id]?.hidden);
   const hiddenItems = items.filter((item) => workingLayouts[item.id]?.hidden);
   const compact = canvasWidth < 760;
@@ -291,12 +310,27 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
   const renderItem = (item: CanvasItem) => {
     if (item.kind === 'classdash') return <ClassDashWidget onOpen={() => onNavigate('/classdash')} />;
     if (item.kind === 'quicklink' && item.quicklink) return <QuicklinkCard link={item.quicklink} />;
+    if (item.kind === 'folder' && item.folder) return <FolderCard folder={item.folder} linkCount={quicklinks.filter((link) => link.folder_id === item.folder!.id).length} onOpen={() => setOpenFolderId(item.folder!.id)} />;
     if (item.kind === 'shortcut' && item.shortcut) return <ShortcutCard shortcut={item.shortcut} onNavigate={onNavigate} onOpenTool={onOpenTool} />;
     return null;
   };
 
   const maxBottom = visibleItems.reduce((maximum, item) => Math.max(maximum, (workingLayouts[item.id]?.y || 0) + (workingLayouts[item.id]?.height || 1)), 0);
   const canvasHeight = Math.max(260, maxBottom * (ROW_HEIGHT + GAP) - GAP);
+  const openFolder = folders.find((folder) => folder.id === openFolderId);
+  const openFolderLinks = openFolder ? quicklinks.filter((link) => link.folder_id === openFolder.id) : [];
+  const folderOverlay = openFolder && typeof document !== 'undefined' ? createPortal(
+    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="quicklink-folder-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpenFolderId(null); }}>
+      <section className="glass-panel max-h-[min(760px,90vh)] w-full max-w-4xl overflow-y-auto rounded-[2rem] border border-violet-300/20 p-5 shadow-2xl sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3"><FolderIcon folder={openFolder} /><div className="min-w-0"><h2 id="quicklink-folder-title" className="truncate text-2xl font-semibold text-white">{openFolder.name}</h2><p className="mt-1 text-sm text-slate-400">{openFolderLinks.length} {openFolderLinks.length === 1 ? 'quick link' : 'quick links'}</p></div></div>
+          <button type="button" onClick={() => setOpenFolderId(null)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/[0.07] hover:text-white" aria-label="Close folder"><X className="h-5 w-5" /></button>
+        </div>
+        {openFolderLinks.length > 0 ? <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{openFolderLinks.map((link) => <div key={link.id} className="min-h-44"><QuicklinkCard link={link} /></div>)}</div> : <div className="mt-6 rounded-2xl border border-dashed border-white/15 p-10 text-center text-sm text-slate-400">This folder is empty. Use Manage links to add something.</div>}
+      </section>
+    </div>,
+    document.body,
+  ) : null;
 
   return (
     <>
@@ -365,6 +399,7 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
         })}
         {!loading && !visibleItems.length && <div className="flex min-h-64 items-center justify-center rounded-[2rem] border border-dashed border-white/15 p-8 text-center"><div><LayoutGrid className="mx-auto h-8 w-8 text-slate-600" /><div className="mt-3 text-sm text-slate-400">Your dashboard is empty.</div><button type="button" onClick={() => { onEditingChange(true); setTrayOpen(true); }} className="mt-4 rounded-xl bg-indigo-500 px-4 py-2 text-sm font-semibold text-white">Add elements</button></div></div>}
       </div>
+      {folderOverlay}
     </>
   );
 }
