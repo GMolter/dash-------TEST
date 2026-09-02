@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Check, GraduationCap, MapPin, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { ClassDashWidget } from '../components/ClassDashWidget';
 import { MapLocationPicker } from '../components/MapLocationPicker';
+import { ExtractedClassMeeting, SyllabusImporter } from '../components/SyllabusImporter';
 import { DAY_LABELS, DEFAULT_WALKING_SPEED_KPH } from '../features/classdash/model';
 import { CLASSDASH_PLUGIN_ID } from '../features/plugins/catalog';
 import { useClassDash } from '../hooks/useClassDash';
@@ -142,6 +143,26 @@ export function ClassDashPage() {
     window.setTimeout(() => document.getElementById('class-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
 
+  const reviewImportedMeeting = (meeting: ExtractedClassMeeting) => {
+    setMeetingForm({
+      code: meeting.code,
+      title: meeting.title,
+      section: meeting.section,
+      days: meeting.days,
+      start_time: meeting.start_time,
+      end_time: meeting.end_time,
+      location_name: meeting.location_name,
+      location_lat: null,
+      location_lng: null,
+      term_start: meeting.term_start,
+      term_end: meeting.term_end,
+    });
+    setShowMeetingForm(true);
+    setFormError('');
+    setSavedMessage('Imported as a draft. Check the details and place the classroom pin before saving.');
+    window.setTimeout(() => document.getElementById('class-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+
   if (loading) return <div className="mx-auto max-w-6xl"><div className="glass-panel h-72 animate-pulse rounded-[2rem]" /></div>;
 
   if (!installed) {
@@ -190,6 +211,8 @@ export function ClassDashPage() {
           <div><div className="flex items-center gap-2 text-lg font-semibold text-white"><CalendarDays className="h-5 w-5 text-violet-300" /> Weekly schedule</div><p className="mt-1 text-sm text-slate-400">Add each class once and select every day it meets.</p></div>
           <button type="button" onClick={() => { setMeetingForm(EMPTY_MEETING); setShowMeetingForm(true); setFormError(''); }} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400"><Plus className="h-4 w-4" /> Add class</button>
         </div>
+
+        <SyllabusImporter onReview={reviewImportedMeeting} />
 
         {meetings.length === 0 ? (
           <div className="mt-6 rounded-2xl border border-dashed border-white/15 px-5 py-10 text-center text-sm text-slate-400">No classes yet. Add your first class to start the countdown.</div>

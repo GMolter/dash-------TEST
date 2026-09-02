@@ -1,5 +1,5 @@
 import { Crosshair, Loader2, LocateFixed, MapPin, Minus, Plus, Search } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Coordinates } from '../features/classdash/model';
 
 const TILE_SIZE = 256;
@@ -120,8 +120,7 @@ export function MapLocationPicker({
     );
   };
 
-  const searchPlaces = async (event: FormEvent) => {
-    event.preventDefault();
+  const searchPlaces = async () => {
     const query = searchQuery.trim();
     if (query.length < 2) {
       setSearchError('Enter at least two characters.');
@@ -187,14 +186,25 @@ export function MapLocationPicker({
           <LocateFixed className="h-3.5 w-3.5" /> Use my location
         </button>
       </div>
-      <form onSubmit={(event) => void searchPlaces(event)} className="relative mb-3">
+      <div className="relative mb-3">
         <div className="flex gap-2">
           <label className="relative min-w-0 flex-1">
             <span className="sr-only">Search OpenStreetMap places</span>
             <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-            <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search a building, dorm, or address" className="w-full rounded-xl border border-white/10 bg-slate-950/60 py-3 pl-10 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-violet-300/40" />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                event.stopPropagation();
+                void searchPlaces();
+              }}
+              placeholder="Search a building, dorm, or address"
+              className="w-full rounded-xl border border-white/10 bg-slate-950/60 py-3 pl-10 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-violet-300/40"
+            />
           </label>
-          <button type="submit" disabled={searching} className="inline-flex min-w-24 items-center justify-center gap-2 rounded-xl border border-violet-300/25 bg-violet-400/10 px-4 text-sm font-semibold text-violet-100 hover:bg-violet-400/20 disabled:opacity-60">
+          <button type="button" onClick={() => void searchPlaces()} disabled={searching} className="inline-flex min-w-24 items-center justify-center gap-2 rounded-xl border border-violet-300/25 bg-violet-400/10 px-4 text-sm font-semibold text-violet-100 hover:bg-violet-400/20 disabled:opacity-60">
             {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Search
           </button>
         </div>
@@ -203,12 +213,12 @@ export function MapLocationPicker({
             {searchResults.map((place) => (
               <button key={place.place_id} type="button" onClick={() => selectPlace(place)} className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/[0.07]">
                 <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-violet-300" />
-                <span><span className="block text-sm text-slate-100">{place.display_name}</span>{place.type && <span className="mt-1 block text-[11px] uppercase tracking-wider text-slate-500">{place.type.replaceAll('_', ' ')}</span>}</span>
+                <span><span className="block text-sm text-slate-100">{place.display_name}</span>{place.type && <span className="mt-1 block text-[11px] uppercase tracking-wider text-slate-500">{place.type.replace(/_/g, ' ')}</span>}</span>
               </button>
             ))}
           </div>
         )}
-      </form>
+      </div>
       {searchError && <p className="mb-3 text-xs text-amber-200">{searchError}</p>}
       <div
         ref={mapRef}

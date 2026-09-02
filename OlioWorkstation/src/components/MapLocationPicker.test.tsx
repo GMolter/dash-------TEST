@@ -21,6 +21,7 @@ describe('MapLocationPicker place search', () => {
   it('searches only when submitted and selects an OpenStreetMap result', async () => {
     const onChange = vi.fn();
     const onPlaceSelected = vi.fn();
+    const outerSubmit = vi.fn();
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => [{
@@ -33,12 +34,13 @@ describe('MapLocationPicker place search', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<MapLocationPicker label="Place the classroom pin" value={null} onChange={onChange} onPlaceSelected={onPlaceSelected} />);
+    render(<form onSubmit={(event) => { event.preventDefault(); outerSubmit(); }}><MapLocationPicker label="Place the classroom pin" value={null} onChange={onChange} onPlaceSelected={onPlaceSelected} /></form>);
     fireEvent.change(screen.getByPlaceholderText('Search a building, dorm, or address'), { target: { value: 'Sample Hall' } });
     expect(fetchMock).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Search' }));
     const result = await screen.findByRole('button', { name: /Sample Hall/ });
+    expect(outerSubmit).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain('q=Sample+Hall');
 
@@ -47,4 +49,3 @@ describe('MapLocationPicker place search', () => {
     expect(onPlaceSelected).toHaveBeenCalledWith('Sample Hall, Bloomington, Indiana');
   });
 });
-

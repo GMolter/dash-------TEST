@@ -236,6 +236,30 @@ export function useDashboardConfiguration() {
     return true;
   }, [modules, user]);
 
+  const resetLayout = useCallback(async () => {
+    if (!user) return false;
+    setSyncing(true);
+    setError(null);
+    const availableById = new Map(modules.map((module) => [module.id, module.available]));
+    const { error: resetError } = await supabase.from('user_dashboard_modules').upsert(
+      DEFAULT_DASHBOARD_ORDER.map((moduleId, orderIndex) => ({
+        user_id: user.id,
+        module_id: moduleId,
+        enabled: availableById.get(moduleId) ?? false,
+        order_index: orderIndex,
+        column_span: DEFAULT_DASHBOARD_SPANS[moduleId],
+        updated_at: new Date().toISOString(),
+      })),
+    );
+    setSyncing(false);
+    if (resetError) {
+      setError(resetError.message);
+      return false;
+    }
+    emitChange();
+    return true;
+  }, [modules, user]);
+
   return {
     loading,
     syncing,
@@ -248,6 +272,7 @@ export function useDashboardConfiguration() {
     moveModule,
     reorderModules,
     updateModuleSpan,
+    resetLayout,
     refresh,
   };
 }

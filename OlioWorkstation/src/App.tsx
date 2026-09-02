@@ -1,9 +1,7 @@
 import { lazy, useState, useEffect } from 'react';
 import { AnimatedBackground } from './components/AnimatedBackground';
 import { Quicklinks } from './components/Quicklinks';
-import { DashboardTodosHomeHeader } from './components/DashboardTodos';
-import { ClassDashWidget } from './components/ClassDashWidget';
-import { DashboardShortcuts } from './components/DashboardShortcuts';
+import { DashboardCanvas } from './components/DashboardCanvas';
 import { AppNavigation } from './components/AppNavigation';
 import { useAuth } from './hooks/useAuth';
 import { useOrg } from './hooks/useOrg';
@@ -22,7 +20,6 @@ import {
   setStoredAppBackgroundTheme,
 } from './lib/appTheme';
 import { AlertTriangle, LayoutDashboard } from 'lucide-react';
-import { useDashboardConfiguration } from './hooks/useDashboardConfiguration';
 import {
   launcherAuthorizationAccess,
   parseLauncherAuthorizationLocation,
@@ -73,13 +70,6 @@ type View =
 
 type BannerState = { enabled: boolean; text: string };
 const BANNER_CACHE_KEY = 'olio-public-banner-v1';
-const DASHBOARD_SPAN_CLASSES: Record<number, string> = {
-  4: 'lg:col-span-4',
-  6: 'lg:col-span-6',
-  8: 'lg:col-span-8',
-  12: 'lg:col-span-12',
-};
-
 function readBannerCache(): BannerState {
   try {
     const cached = window.localStorage.getItem(BANNER_CACHE_KEY);
@@ -105,9 +95,9 @@ function writeBannerCache(banner: BannerState) {
 function App() {
   const { user, loading: authLoading } = useAuth();
   const { profile, organization } = useOrg();
-  const { modules: dashboardModules } = useDashboardConfiguration();
 
   const [view, setView] = useState<View>({ type: 'home' });
+  const [dashboardEditing, setDashboardEditing] = useState(() => new URLSearchParams(window.location.search).get('edit') === 'dashboard');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [banner, setBanner] = useState<BannerState>(readBannerCache);
   const [allowOnboarding, setAllowOnboarding] = useState(false);
@@ -321,6 +311,7 @@ function App() {
       }
 
       setView({ type: 'home' });
+      setDashboardEditing(new URLSearchParams(window.location.search).get('edit') === 'dashboard');
     };
 
     resolve();
@@ -366,11 +357,8 @@ function App() {
   ];
 
   const renderHome = () => {
-    const enabled = new Set(dashboardModules.filter((module) => module.enabled && module.available).map((module) => module.id));
-    const orderedContentModules = dashboardModules.filter((module) => module.enabled && module.available && module.id !== 'tasks');
     return (
     <div className="mx-auto min-h-screen w-full max-w-[88rem] px-5 pb-16 sm:px-8 lg:px-12">
-      {enabled.has('tasks') && <DashboardTodosHomeHeader />}
       <section className="mx-auto max-w-4xl pt-24 text-center md:pt-6 lg:pt-5">
         <h1 className="text-3xl font-semibold tracking-[-0.03em] text-white drop-shadow-[0_5px_28px_rgba(255,255,255,0.12)] sm:text-4xl lg:text-4xl">
           Olio Workstation
@@ -383,7 +371,7 @@ function App() {
           <span className="font-mono text-slate-200">{formatTime(currentTime)}</span>
         </p>
         <div className="mx-auto mt-4 h-px w-14 bg-gradient-to-r from-transparent via-violet-400 to-transparent shadow-[0_0_14px_rgba(139,92,246,0.9)]" />
-        <button type="button" onClick={() => navigateTo('/utilities/plugins')} className="mx-auto mt-5 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/35 px-3.5 py-2 text-xs font-medium text-slate-300 backdrop-blur hover:border-indigo-300/25 hover:text-white"><LayoutDashboard className="h-3.5 w-3.5" /> Customize dashboard</button>
+        <button type="button" onClick={() => navigateTo('/?edit=dashboard')} className="mx-auto mt-5 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/35 px-3.5 py-2 text-xs font-medium text-slate-300 backdrop-blur hover:border-indigo-300/25 hover:text-white"><LayoutDashboard className="h-3.5 w-3.5" /> Customize dashboard</button>
       </section>
 
       {banner.enabled && banner.text?.trim() && (
@@ -397,15 +385,15 @@ function App() {
         </div>
       )}
 
-      <div className="mt-7 grid grid-cols-1 gap-6 sm:mt-8 lg:mt-8 lg:grid-cols-12">
-        {orderedContentModules.map((module) => {
-          const wrapperClass = `dashboard-module min-w-0 ${DASHBOARD_SPAN_CLASSES[module.span]}`;
-          if (module.id === 'classdash') return <div key={module.id} className={wrapperClass}><ClassDashWidget onOpen={() => navigateTo('/classdash')} /></div>;
-          if (module.id === 'quicklinks') return <section key={module.id} className={wrapperClass} aria-label="Quick Links"><Quicklinks editMode={false} /></section>;
-          if (module.id === 'shortcuts') return <div key={module.id} className={wrapperClass}><DashboardShortcuts onNavigate={navigateTo} onOpenTool={(tool) => setView({ type: 'tool', tool })} /></div>;
-          return null;
-        })}
-      </div>
+      <DashboardCanvas
+        editing={dashboardEditing}
+        onEditingChange={(editing) => {
+          setDashboardEditing(editing);
+          if (!editing && window.location.pathname === '/') window.history.replaceState({}, '', '/');
+        }}
+        onNavigate={navigateTo}
+        onOpenTool={(tool) => setView({ type: 'tool', tool })}
+      />
     </div>
     );
   };
