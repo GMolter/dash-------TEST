@@ -92,6 +92,26 @@
 }
 
 @layer utilities {
+  .dashboard-module {
+    container-type: inline-size;
+  }
+
+  @container (max-width: 700px) {
+    .dashboard-module .dashboard-quicklinks-grid,
+    .dashboard-module .dashboard-shortcuts-grid,
+    .dashboard-module .classdash-meta {
+      grid-template-columns: 1fr 1fr !important;
+    }
+  }
+
+  @container (max-width: 460px) {
+    .dashboard-module .dashboard-quicklinks-grid,
+    .dashboard-module .dashboard-shortcuts-grid,
+    .dashboard-module .classdash-meta {
+      grid-template-columns: 1fr !important;
+    }
+  }
+
   .scrollbar-theme {
     scrollbar-width: thin;
     scrollbar-color: rgba(59, 130, 246, 0.45) rgba(15, 23, 42, 0.45);

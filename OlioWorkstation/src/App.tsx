@@ -21,7 +21,7 @@ import {
   setStoredAppBackgroundThemePreset,
   setStoredAppBackgroundTheme,
 } from './lib/appTheme';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, LayoutDashboard } from 'lucide-react';
 import { useDashboardConfiguration } from './hooks/useDashboardConfiguration';
 import {
   launcherAuthorizationAccess,
@@ -73,6 +73,12 @@ type View =
 
 type BannerState = { enabled: boolean; text: string };
 const BANNER_CACHE_KEY = 'olio-public-banner-v1';
+const DASHBOARD_SPAN_CLASSES: Record<number, string> = {
+  4: 'lg:col-span-4',
+  6: 'lg:col-span-6',
+  8: 'lg:col-span-8',
+  12: 'lg:col-span-12',
+};
 
 function readBannerCache(): BannerState {
   try {
@@ -264,6 +270,11 @@ function App() {
         return;
       }
 
+      if (cleanPath === '/utilities/plugins') {
+        setView({ type: 'tool', tool: 'plugins' });
+        return;
+      }
+
       if (cleanPath === '/classdash') {
         setView({ type: 'classdash' });
         return;
@@ -372,6 +383,7 @@ function App() {
           <span className="font-mono text-slate-200">{formatTime(currentTime)}</span>
         </p>
         <div className="mx-auto mt-4 h-px w-14 bg-gradient-to-r from-transparent via-violet-400 to-transparent shadow-[0_0_14px_rgba(139,92,246,0.9)]" />
+        <button type="button" onClick={() => navigateTo('/utilities/plugins')} className="mx-auto mt-5 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-slate-950/35 px-3.5 py-2 text-xs font-medium text-slate-300 backdrop-blur hover:border-indigo-300/25 hover:text-white"><LayoutDashboard className="h-3.5 w-3.5" /> Customize dashboard</button>
       </section>
 
       {banner.enabled && banner.text?.trim() && (
@@ -385,11 +397,12 @@ function App() {
         </div>
       )}
 
-      <div className="mt-7 space-y-6 sm:mt-8 lg:mt-8">
+      <div className="mt-7 grid grid-cols-1 gap-6 sm:mt-8 lg:mt-8 lg:grid-cols-12">
         {orderedContentModules.map((module) => {
-          if (module.id === 'classdash') return <ClassDashWidget key={module.id} onOpen={() => navigateTo('/classdash')} />;
-          if (module.id === 'quicklinks') return <section key={module.id} aria-label="Quick Links"><Quicklinks editMode={false} /></section>;
-          if (module.id === 'shortcuts') return <DashboardShortcuts key={module.id} onNavigate={navigateTo} onOpenTool={(tool) => setView({ type: 'tool', tool })} />;
+          const wrapperClass = `dashboard-module min-w-0 ${DASHBOARD_SPAN_CLASSES[module.span]}`;
+          if (module.id === 'classdash') return <div key={module.id} className={wrapperClass}><ClassDashWidget onOpen={() => navigateTo('/classdash')} /></div>;
+          if (module.id === 'quicklinks') return <section key={module.id} className={wrapperClass} aria-label="Quick Links"><Quicklinks editMode={false} /></section>;
+          if (module.id === 'shortcuts') return <div key={module.id} className={wrapperClass}><DashboardShortcuts onNavigate={navigateTo} onOpenTool={(tool) => setView({ type: 'tool', tool })} /></div>;
           return null;
         })}
       </div>
@@ -402,7 +415,7 @@ function App() {
       return (
         <div className="space-y-6">
           <button
-            onClick={() => setView({ type: 'utilities' })}
+            onClick={() => navigateTo('/utilities')}
             className="text-slate-300 hover:text-white flex items-center gap-2"
           >
             ← Back to Utilities
@@ -427,6 +440,8 @@ function App() {
             navigateTo('/projects');
           } else if (toolId === 'triggers') {
             navigateTo('/help');
+          } else if (toolId === 'plugins') {
+            navigateTo('/utilities/plugins');
           } else {
             setView({ type: 'tool', tool: toolId });
           }

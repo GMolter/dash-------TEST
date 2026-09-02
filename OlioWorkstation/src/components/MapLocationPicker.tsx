@@ -1,9 +1,20 @@
-import { Crosshair, LocateFixed, MapPin, Minus, Plus } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Crosshair, Loader2, LocateFixed, MapPin, Minus, Plus, Search } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Coordinates } from '../features/classdash/model';
 
 const TILE_SIZE = 256;
 const DEFAULT_CENTER = { lat: 39.1688, lng: -86.5186 };
+const GEOCODER_URL = import.meta.env.VITE_CLASSDASH_GEOCODER_URL || 'https://nominatim.openstreetmap.org/search';
+const SEARCH_CACHE_PREFIX = 'classdash-place-search:';
+let lastGeocoderRequestAt = 0;
+
+type PlaceResult = {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+  type?: string;
+};
 
 function longitudeToPixel(longitude: number, zoom: number) {
   return ((longitude + 180) / 360) * TILE_SIZE * 2 ** zoom;
@@ -26,15 +37,21 @@ function pixelToLatitude(pixel: number, zoom: number) {
 export function MapLocationPicker({
   value,
   onChange,
+  onPlaceSelected,
   label,
 }: {
   value: Coordinates | null;
   onChange: (coordinates: Coordinates) => void;
+  onPlaceSelected?: (placeName: string) => void;
   label: string;
 }) {
   const [center, setCenter] = useState<Coordinates>(value || DEFAULT_CENTER);
   const [zoom, setZoom] = useState(16);
   const [locationError, setLocationError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<PlaceResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const mapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(720);
   const height = 280;
@@ -103,6 +120,65 @@ export function MapLocationPicker({
     );
   };
 
+  const searchPlaces = async (event: FormEvent) => {
+    event.preventDefault();
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setSearchError('Enter at least two characters.');
+      return;
+    }
+
+    setSearching(true);
+    setSearchError('');
+    try {
+      const cacheKey = `${SEARCH_CACHE_PREFIX}${query.toLocaleLowerCase()}`;
+      let cached: string | null = null;
+      try {
+        cached = window.sessionStorage.getItem(cacheKey);
+      } catch {
+        // Search still works when browser storage is unavailable.
+      }
+      if (cached) {
+        setSearchResults(JSON.parse(cached) as PlaceResult[]);
+        return;
+      }
+
+      const throttleDelay = Math.max(0, 1_000 - (Date.now() - lastGeocoderRequestAt));
+      if (throttleDelay > 0) await new Promise((resolve) => window.setTimeout(resolve, throttleDelay));
+      const requestUrl = new URL(GEOCODER_URL);
+      requestUrl.searchParams.set('q', query);
+      requestUrl.searchParams.set('format', 'jsonv2');
+      requestUrl.searchParams.set('limit', '5');
+      requestUrl.searchParams.set('addressdetails', '0');
+      requestUrl.searchParams.set('accept-language', navigator.language || 'en');
+      lastGeocoderRequestAt = Date.now();
+      const response = await fetch(requestUrl, { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`Search returned ${response.status}`);
+      const results = (await response.json()) as PlaceResult[];
+      try {
+        window.sessionStorage.setItem(cacheKey, JSON.stringify(results));
+      } catch {
+        // Caching is best-effort in hardened/private browsing modes.
+      }
+      setSearchResults(results);
+      if (results.length === 0) setSearchError('No matching places found. Try adding a city or state.');
+    } catch {
+      setSearchError('Place search is temporarily unavailable. You can still click the map to place the pin.');
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const selectPlace = (place: PlaceResult) => {
+    const coordinates = { lat: Number(place.lat), lng: Number(place.lon) };
+    setCenter(coordinates);
+    onChange(coordinates);
+    onPlaceSelected?.(place.display_name);
+    setSearchQuery(place.display_name);
+    setSearchResults([]);
+  };
+
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -111,6 +187,29 @@ export function MapLocationPicker({
           <LocateFixed className="h-3.5 w-3.5" /> Use my location
         </button>
       </div>
+      <form onSubmit={(event) => void searchPlaces(event)} className="relative mb-3">
+        <div className="flex gap-2">
+          <label className="relative min-w-0 flex-1">
+            <span className="sr-only">Search OpenStreetMap places</span>
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+            <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search a building, dorm, or address" className="w-full rounded-xl border border-white/10 bg-slate-950/60 py-3 pl-10 pr-4 text-sm text-white outline-none placeholder:text-slate-500 focus:border-violet-300/40" />
+          </label>
+          <button type="submit" disabled={searching} className="inline-flex min-w-24 items-center justify-center gap-2 rounded-xl border border-violet-300/25 bg-violet-400/10 px-4 text-sm font-semibold text-violet-100 hover:bg-violet-400/20 disabled:opacity-60">
+            {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Search
+          </button>
+        </div>
+        {searchResults.length > 0 && (
+          <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-2xl border border-white/15 bg-slate-950/95 p-2 shadow-2xl backdrop-blur-xl">
+            {searchResults.map((place) => (
+              <button key={place.place_id} type="button" onClick={() => selectPlace(place)} className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-left hover:bg-white/[0.07]">
+                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-violet-300" />
+                <span><span className="block text-sm text-slate-100">{place.display_name}</span>{place.type && <span className="mt-1 block text-[11px] uppercase tracking-wider text-slate-500">{place.type.replaceAll('_', ' ')}</span>}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </form>
+      {searchError && <p className="mb-3 text-xs text-amber-200">{searchError}</p>}
       <div
         ref={mapRef}
         className="relative h-[280px] w-full cursor-crosshair overflow-hidden rounded-2xl border border-white/10 bg-slate-800"
@@ -145,7 +244,7 @@ export function MapLocationPicker({
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
         <span>{value ? `${value.lat.toFixed(6)}, ${value.lng.toFixed(6)}` : 'No pin selected'}</span>
-        <span>Click anywhere to move the pin.</span>
+        <span>Click anywhere to move the pin · Search queries are sent to OpenStreetMap; don’t enter private information.</span>
       </div>
       {locationError && <p className="mt-2 text-xs text-amber-200">{locationError}</p>}
     </div>

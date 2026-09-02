@@ -45,7 +45,6 @@ describe('ClassDash schedule model', () => {
     expect(estimateWalkingMinutes(
       { lat: settings.dorm_lat, lng: settings.dorm_lng },
       { lat: meeting.location_lat, lng: meeting.location_lng },
-      settings.walking_speed_kph,
     )).toBeGreaterThan(5);
   });
 
@@ -55,6 +54,13 @@ describe('ClassDash schedule model', () => {
     expect(instance).toBeDefined();
     const leadMinutes = (instance.start.getTime() - instance.leaveAt.getTime()) / 60_000;
     expect(leadMinutes).toBe(instance.walkMinutes + CLASSDASH_BUFFER_MINUTES);
+  });
+
+  it('always uses the standard 12.5 minute per kilometer pace', () => {
+    const now = new Date(2026, 8, 2, 8, 0, 0);
+    const [slowPreference] = buildClassInstances(now, [meeting], { ...settings, walking_speed_kph: 1 });
+    const [fastPreference] = buildClassInstances(now, [meeting], { ...settings, walking_speed_kph: 10 });
+    expect(slowPreference.walkMinutes).toBe(fastPreference.walkMinutes);
   });
 
   it('reports waiting, leave-now, and in-class states', () => {
@@ -70,4 +76,3 @@ describe('ClassDash schedule model', () => {
     expect(buildClassInstances(afterTerm, [meeting], settings)).toHaveLength(0);
   });
 });
-

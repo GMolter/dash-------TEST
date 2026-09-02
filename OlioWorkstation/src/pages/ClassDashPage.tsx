@@ -45,7 +45,6 @@ export function ClassDashPage() {
   const { installPlugin } = useDashboardConfiguration();
   const [dormName, setDormName] = useState('');
   const [dormCoordinates, setDormCoordinates] = useState<{ lat: number; lng: number } | null>(null);
-  const [walkingSpeed, setWalkingSpeed] = useState(DEFAULT_WALKING_SPEED_KPH);
   const [meetingForm, setMeetingForm] = useState<MeetingForm>(EMPTY_MEETING);
   const [showMeetingForm, setShowMeetingForm] = useState(false);
   const [formError, setFormError] = useState('');
@@ -55,7 +54,6 @@ export function ClassDashPage() {
     if (!settings) return;
     setDormName(settings.dorm_name);
     setDormCoordinates({ lat: settings.dorm_lat, lng: settings.dorm_lng });
-    setWalkingSpeed(Number(settings.walking_speed_kph));
   }, [settings]);
 
   const meetingLocation = useMemo(() => (
@@ -76,7 +74,7 @@ export function ClassDashPage() {
       dorm_name: dormName.trim(),
       dorm_lat: dormCoordinates.lat,
       dorm_lng: dormCoordinates.lng,
-      walking_speed_kph: walkingSpeed,
+      walking_speed_kph: DEFAULT_WALKING_SPEED_KPH,
     });
     if (saved) setSavedMessage('Home location saved. All leave times have been recalculated.');
   };
@@ -178,14 +176,13 @@ export function ClassDashPage() {
 
       <form onSubmit={saveDorm} className="glass-panel rounded-[2rem] p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div><div className="flex items-center gap-2 text-lg font-semibold text-white"><MapPin className="h-5 w-5 text-violet-300" /> Home base</div><p className="mt-1 text-sm text-slate-400">Every trip starts here. A five-minute buffer is always added automatically.</p></div>
+          <div><div className="flex items-center gap-2 text-lg font-semibold text-white"><MapPin className="h-5 w-5 text-violet-300" /> Home base</div><p className="mt-1 text-sm text-slate-400">Every trip starts here. ClassDash uses an average 12.5 min/km walking pace and automatically adds a five-minute buffer.</p></div>
           <button type="submit" disabled={syncing} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400 disabled:opacity-60"><Save className="h-4 w-4" /> Save home</button>
         </div>
-        <div className="mt-6 grid gap-5 sm:grid-cols-[1fr_13rem]">
+        <div className="mt-6">
           <label className="text-sm text-slate-300">Dorm or home name<input value={dormName} onChange={(event) => setDormName(event.target.value)} placeholder="Teter Quad" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none focus:border-violet-300/40" /></label>
-          <label className="text-sm text-slate-300">Walking pace<input type="number" min="1" max="10" step="0.1" value={walkingSpeed} onChange={(event) => setWalkingSpeed(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none focus:border-violet-300/40" /><span className="mt-1 block text-xs text-slate-500">kilometers per hour</span></label>
         </div>
-        <div className="mt-6"><MapLocationPicker key={settings ? `${settings.dorm_lat}-${settings.dorm_lng}` : 'new-home'} label="Place your dorm or home pin" value={dormCoordinates} onChange={setDormCoordinates} /></div>
+        <div className="mt-6"><MapLocationPicker key={settings ? `${settings.dorm_lat}-${settings.dorm_lng}` : 'new-home'} label="Place your dorm or home pin" value={dormCoordinates} onChange={setDormCoordinates} onPlaceSelected={(place) => { if (!dormName.trim()) setDormName(place); }} /></div>
       </form>
 
       <section id="class-editor" className="glass-panel scroll-mt-28 rounded-[2rem] p-6 sm:p-8">
@@ -222,7 +219,7 @@ export function ClassDashPage() {
             </div>
             <fieldset className="mt-5"><legend className="text-sm text-slate-300">Meeting days</legend><div className="mt-2 flex flex-wrap gap-2">{DAY_LABELS.map((day, index) => { const selected = meetingForm.days.includes(index); return <button key={day} type="button" onClick={() => setMeetingForm((current) => ({ ...current, days: selected ? current.days.filter((value) => value !== index) : [...current.days, index] }))} className={`rounded-xl border px-3 py-2 text-sm ${selected ? 'border-violet-300/35 bg-violet-400/15 text-violet-100' : 'border-white/10 bg-slate-950/40 text-slate-400'}`} aria-pressed={selected}>{selected && <Check className="mr-1 inline h-3.5 w-3.5" />}{day}</button>; })}</div></fieldset>
             <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm text-slate-300">Semester starts <span className="text-slate-500">(optional)</span><input type="date" value={meetingForm.term_start} onChange={(event) => setMeetingForm((current) => ({ ...current, term_start: event.target.value }))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none focus:border-violet-300/40" /></label><label className="text-sm text-slate-300">Semester ends <span className="text-slate-500">(optional)</span><input type="date" value={meetingForm.term_end} onChange={(event) => setMeetingForm((current) => ({ ...current, term_end: event.target.value }))} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none focus:border-violet-300/40" /></label></div>
-            <div className="mt-6"><MapLocationPicker key={meetingForm.id || 'new-class'} label="Place the classroom pin" value={meetingLocation} onChange={(coordinates) => setMeetingForm((current) => ({ ...current, location_lat: coordinates.lat, location_lng: coordinates.lng }))} /></div>
+            <div className="mt-6"><MapLocationPicker key={meetingForm.id || 'new-class'} label="Place the classroom pin" value={meetingLocation} onChange={(coordinates) => setMeetingForm((current) => ({ ...current, location_lat: coordinates.lat, location_lng: coordinates.lng }))} onPlaceSelected={(place) => setMeetingForm((current) => ({ ...current, location_name: current.location_name.trim() ? current.location_name : place }))} /></div>
             <div className="mt-6 flex justify-end"><button type="submit" disabled={syncing} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-5 py-3 text-sm font-semibold text-white hover:bg-violet-400 disabled:opacity-60"><Save className="h-4 w-4" /> {meetingForm.id ? 'Save changes' : 'Add to schedule'}</button></div>
           </form>
         )}

@@ -38,6 +38,7 @@ export type ClassInstance = {
 export type ClassDashStatus = 'waiting' | 'leave-now' | 'in-class';
 
 export const CLASSDASH_BUFFER_MINUTES = 5;
+// 12.5 minutes per kilometer, equivalent to a 20-minute mile.
 export const DEFAULT_WALKING_SPEED_KPH = 4.8;
 // Campus paths are rarely straight lines. This makes a safe key-free estimate.
 export const WALKING_ROUTE_FACTOR = 1.2;
@@ -54,10 +55,9 @@ export function haversineKilometers(from: Coordinates, to: Coordinates) {
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-export function estimateWalkingMinutes(from: Coordinates, to: Coordinates, speedKph = DEFAULT_WALKING_SPEED_KPH) {
-  const safeSpeed = Math.min(10, Math.max(1, speedKph));
+export function estimateWalkingMinutes(from: Coordinates, to: Coordinates) {
   const adjustedDistance = haversineKilometers(from, to) * WALKING_ROUTE_FACTOR;
-  return Math.max(1, Math.ceil((adjustedDistance / safeSpeed) * 60));
+  return Math.max(1, Math.ceil((adjustedDistance / DEFAULT_WALKING_SPEED_KPH) * 60));
 }
 
 function dateAtTime(date: Date, time: string) {
@@ -96,7 +96,6 @@ export function buildClassInstances(
       const walkMinutes = estimateWalkingMinutes(
         { lat: settings.dorm_lat, lng: settings.dorm_lng },
         { lat: meeting.location_lat, lng: meeting.location_lng },
-        Number(settings.walking_speed_kph),
       );
       const leaveAt = new Date(start.getTime() - (walkMinutes + CLASSDASH_BUFFER_MINUTES) * 60_000);
       result.push({ meeting, date, start, end, leaveAt, walkMinutes, dayOffset: offset });
@@ -120,4 +119,3 @@ export function formatCountdown(milliseconds: number) {
   if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
-

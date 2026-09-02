@@ -578,7 +578,7 @@ export function Quicklinks({ editMode = false, collection = 'personal' }: Props)
     return (
       <>
         <div className="w-full">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4 lg:gap-5">
+          <div className="dashboard-quicklinks-grid grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4 lg:gap-5">
           {allGridItems.map((item) => {
             if (item.itemType === 'folder') {
               const folder = item.data;

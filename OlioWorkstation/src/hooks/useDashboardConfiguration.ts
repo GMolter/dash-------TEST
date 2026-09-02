@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabase';
 import {
   DASHBOARD_MODULES,
   DashboardModuleId,
+  DashboardModuleSpan,
   DEFAULT_DASHBOARD_ORDER,
+  DEFAULT_DASHBOARD_SPANS,
   PluginId,
 } from '../features/plugins/catalog';
 
@@ -22,6 +24,7 @@ type StoredDashboardModule = {
   module_id: string;
   enabled: boolean;
   order_index: number;
+  column_span: DashboardModuleSpan;
 };
 
 export type DashboardModule = {
@@ -30,6 +33,7 @@ export type DashboardModule = {
   description: string;
   enabled: boolean;
   order: number;
+  span: DashboardModuleSpan;
   available: boolean;
 };
 
@@ -92,6 +96,7 @@ export function useDashboardConfiguration() {
         description: definition.description,
         enabled: available && (saved?.enabled ?? true),
         order: saved?.order_index ?? fallbackOrder,
+        span: saved?.column_span ?? DEFAULT_DASHBOARD_SPANS[definition.id],
         available,
       };
     }).sort((a, b) => a.order - b.order);
@@ -144,6 +149,7 @@ export function useDashboardConfiguration() {
       module_id: moduleId,
       enabled,
       order_index: current?.order ?? DEFAULT_DASHBOARD_ORDER.indexOf(moduleId),
+      column_span: current?.span ?? DEFAULT_DASHBOARD_SPANS[moduleId],
       updated_at: new Date().toISOString(),
     });
     setSyncing(false);
@@ -157,7 +163,7 @@ export function useDashboardConfiguration() {
 
   const moveModule = useCallback(async (moduleId: DashboardModuleId, direction: 'up' | 'down') => {
     if (!user) return false;
-    const available = modules.filter((module) => module.available);
+    const available = modules.filter((module) => module.available && module.id !== 'tasks');
     const index = available.findIndex((module) => module.id === moduleId);
     const swapIndex = direction === 'up' ? index - 1 : index + 1;
     if (index < 0 || swapIndex < 0 || swapIndex >= available.length) return false;
@@ -170,12 +176,60 @@ export function useDashboardConfiguration() {
         module_id: module.id,
         enabled: module.enabled,
         order_index: orderIndex,
+        column_span: module.span,
         updated_at: new Date().toISOString(),
       })),
     );
     setSyncing(false);
     if (moveError) {
       setError(moveError.message);
+      return false;
+    }
+    emitChange();
+    return true;
+  }, [modules, user]);
+
+  const reorderModules = useCallback(async (moduleIds: DashboardModuleId[]) => {
+    if (!user) return false;
+    const availableById = new Map(modules.filter((module) => module.available && module.id !== 'tasks').map((module) => [module.id, module]));
+    const ordered = moduleIds.map((id) => availableById.get(id)).filter((module): module is DashboardModule => !!module);
+    if (ordered.length !== availableById.size) return false;
+    setSyncing(true);
+    const { error: reorderError } = await supabase.from('user_dashboard_modules').upsert(
+      ordered.map((module, orderIndex) => ({
+        user_id: user.id,
+        module_id: module.id,
+        enabled: module.enabled,
+        order_index: orderIndex,
+        column_span: module.span,
+        updated_at: new Date().toISOString(),
+      })),
+    );
+    setSyncing(false);
+    if (reorderError) {
+      setError(reorderError.message);
+      return false;
+    }
+    emitChange();
+    return true;
+  }, [modules, user]);
+
+  const updateModuleSpan = useCallback(async (moduleId: DashboardModuleId, span: DashboardModuleSpan) => {
+    if (!user) return false;
+    const current = modules.find((module) => module.id === moduleId);
+    if (!current) return false;
+    setSyncing(true);
+    const { error: resizeError } = await supabase.from('user_dashboard_modules').upsert({
+      user_id: user.id,
+      module_id: moduleId,
+      enabled: current.enabled,
+      order_index: current.order,
+      column_span: span,
+      updated_at: new Date().toISOString(),
+    });
+    setSyncing(false);
+    if (resizeError) {
+      setError(resizeError.message);
       return false;
     }
     emitChange();
@@ -192,7 +246,8 @@ export function useDashboardConfiguration() {
     uninstallPlugin,
     updateModule,
     moveModule,
+    reorderModules,
+    updateModuleSpan,
     refresh,
   };
 }
-

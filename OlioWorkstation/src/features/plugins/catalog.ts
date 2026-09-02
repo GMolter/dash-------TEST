@@ -25,3 +25,11 @@ export type DashboardModuleId = (typeof DASHBOARD_MODULES)[number]['id'];
 
 export const DEFAULT_DASHBOARD_ORDER: DashboardModuleId[] = ['classdash', 'quicklinks', 'shortcuts', 'tasks'];
 
+export type DashboardModuleSpan = 4 | 6 | 8 | 12;
+
+export const DEFAULT_DASHBOARD_SPANS: Record<DashboardModuleId, DashboardModuleSpan> = {
+  classdash: 12,
+  quicklinks: 12,
+  shortcuts: 12,
+  tasks: 4,
+};
