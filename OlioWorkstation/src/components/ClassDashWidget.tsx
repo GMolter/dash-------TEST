@@ -88,9 +88,10 @@ export function ClassDashWidget({ onOpen, full = false }: { onOpen: () => void; 
 
       <div className="classdash-meta mt-6 grid gap-3 border-t border-white/10 pt-5 sm:grid-cols-3">
         <div className="flex items-center gap-3"><Clock3 className="h-4 w-4 text-violet-300" /><div><div className="text-[11px] uppercase tracking-wider text-slate-500">Class time</div><div className="mt-1 text-sm text-slate-200">{formatTime(next.start)}–{formatTime(next.end)}</div></div></div>
-        <div className="flex items-center gap-3"><Route className="h-4 w-4 text-violet-300" /><div><div className="text-[11px] uppercase tracking-wider text-slate-500">Leave home</div><div className="mt-1 text-sm text-slate-200">{next.walkMinutes} min walk + {CLASSDASH_BUFFER_MINUTES} min buffer</div></div></div>
+        <div className="flex items-center gap-3"><Route className="h-4 w-4 text-violet-300" /><div><div className="text-[11px] uppercase tracking-wider text-slate-500">Travel from</div><div className="mt-1 text-sm text-slate-200">{next.originName} · {next.walkMinutes} min + {CLASSDASH_BUFFER_MINUTES} min buffer</div></div></div>
         <div className="flex items-center gap-3"><MapPin className="h-4 w-4 text-violet-300" /><div><div className="text-[11px] uppercase tracking-wider text-slate-500">Destination</div><div className="mt-1 text-sm text-slate-200">{next.meeting.location_name}</div></div></div>
       </div>
+      {next.tightConnection && <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-400/[0.08] px-3 py-2 text-xs text-amber-100">Tight connection: the walk and buffer are longer than the {next.gapMinutes}-minute gap after {next.previousMeeting?.code}.</div>}
     </section>
   );
 }

@@ -75,4 +75,44 @@ describe('ClassDash schedule model', () => {
     const afterTerm = new Date(2027, 0, 6, 8, 0, 0);
     expect(buildClassInstances(afterTerm, [meeting], settings)).toHaveLength(0);
   });
+
+  it('walks from the previous classroom when the gap is 45 minutes or less', () => {
+    const nextMeeting: ClassMeeting = {
+      ...meeting,
+      id: 'class-2',
+      code: 'TEST-202',
+      start_time: '10:45:00',
+      end_time: '11:30:00',
+      location_name: 'Next Classroom',
+      location_lat: 39.175,
+      location_lng: -86.521,
+      sort_order: 1,
+    };
+    const instances = buildClassInstances(new Date(2026, 8, 2, 8, 0, 0), [meeting, nextMeeting], settings);
+    expect(instances[1].originType).toBe('class');
+    expect(instances[1].originName).toBe('Classroom');
+    expect(instances[1].gapMinutes).toBe(45);
+    expect(instances[1].walkMinutes).toBe(estimateWalkingMinutes(
+      { lat: meeting.location_lat, lng: meeting.location_lng },
+      { lat: nextMeeting.location_lat, lng: nextMeeting.location_lng },
+    ));
+  });
+
+  it('returns to the dorm as the assumed origin when the gap exceeds 45 minutes', () => {
+    const laterMeeting: ClassMeeting = {
+      ...meeting,
+      id: 'class-3',
+      code: 'TEST-303',
+      start_time: '10:46:00',
+      end_time: '11:30:00',
+      location_name: 'Later Classroom',
+      location_lat: 39.18,
+      location_lng: -86.51,
+      sort_order: 1,
+    };
+    const instances = buildClassInstances(new Date(2026, 8, 2, 8, 0, 0), [meeting, laterMeeting], settings);
+    expect(instances[1].gapMinutes).toBe(46);
+    expect(instances[1].originType).toBe('home');
+    expect(instances[1].originName).toBe('Home');
+  });
 });

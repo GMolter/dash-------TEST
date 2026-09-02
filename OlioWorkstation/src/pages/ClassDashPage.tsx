@@ -197,7 +197,7 @@ export function ClassDashPage() {
 
       <form onSubmit={saveDorm} className="glass-panel rounded-[2rem] p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div><div className="flex items-center gap-2 text-lg font-semibold text-white"><MapPin className="h-5 w-5 text-violet-300" /> Home base</div><p className="mt-1 text-sm text-slate-400">Every trip starts here. ClassDash uses an average 12.5 min/km walking pace and automatically adds a five-minute buffer.</p></div>
+          <div><div className="flex items-center gap-2 text-lg font-semibold text-white"><MapPin className="h-5 w-5 text-violet-300" /> Home base</div><p className="mt-1 text-sm text-slate-400">Trips start here for your first class and whenever the previous class ended more than 45 minutes ago. Shorter gaps use the previous classroom. Walking uses an average 12.5 min/km pace plus a five-minute buffer.</p></div>
           <button type="submit" disabled={syncing} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400 disabled:opacity-60"><Save className="h-4 w-4" /> Save home</button>
         </div>
         <div className="mt-6">

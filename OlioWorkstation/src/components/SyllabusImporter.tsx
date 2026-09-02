@@ -1,12 +1,14 @@
 import { ChangeEvent, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, FileText, Loader2, Sparkles, Upload, X } from 'lucide-react';
+import { AlertCircle, CalendarDays, CheckCircle2, FileText, Loader2, Sparkles, Upload, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { parseClassScheduleIcs } from '../features/classdash/ics';
 
 const MAX_FILE_BYTES = 3 * 1024 * 1024;
-const ACCEPTED_EXTENSIONS = ['pdf', 'doc', 'docx', 'txt', 'md', 'rtf', 'odt'];
+const ACCEPTED_EXTENSIONS = ['pdf', 'doc', 'docx', 'txt', 'md', 'rtf', 'odt', 'ics'];
 const FALLBACK_MIME_TYPES: Record<string, string> = {
   pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   txt: 'text/plain', md: 'text/markdown', rtf: 'application/rtf', odt: 'application/vnd.oasis.opendocument.text',
+  ics: 'text/calendar',
 };
 
 export type ExtractedClassMeeting = {
@@ -39,6 +41,7 @@ export function SyllabusImporter({ onReview }: { onReview: (meeting: ExtractedCl
   const [extracting, setExtracting] = useState(false);
   const [error, setError] = useState('');
   const [meetings, setMeetings] = useState<ExtractedClassMeeting[]>([]);
+  const selectedExtension = file?.name.split('.').pop()?.toLowerCase() || '';
 
   const chooseFile = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.files?.[0] || null;
@@ -50,7 +53,7 @@ export function SyllabusImporter({ onReview }: { onReview: (meeting: ExtractedCl
     }
     const extension = next.name.split('.').pop()?.toLowerCase() || '';
     if (!ACCEPTED_EXTENSIONS.includes(extension)) {
-      setError('Use a PDF, Word document, RTF, ODT, Markdown, or text file.');
+      setError('Use an ICS calendar, PDF, Word document, RTF, ODT, Markdown, or text file.');
       event.target.value = '';
       return;
     }
@@ -64,7 +67,8 @@ export function SyllabusImporter({ onReview }: { onReview: (meeting: ExtractedCl
 
   const extract = async () => {
     if (!file || extracting) return;
-    if (!session?.access_token) {
+    const extension = selectedExtension;
+    if (extension !== 'ics' && !session?.access_token) {
       setError('Sign in again before importing a syllabus.');
       return;
     }
@@ -72,8 +76,13 @@ export function SyllabusImporter({ onReview }: { onReview: (meeting: ExtractedCl
     setError('');
     setMeetings([]);
     try {
+      if (extension === 'ics') {
+        const extracted = parseClassScheduleIcs(await file.text());
+        if (!extracted.length) throw new Error('No timed class events were found in that calendar file.');
+        setMeetings(extracted);
+        return;
+      }
       const rawFileData = await fileToDataUrl(file);
-      const extension = file.name.split('.').pop()?.toLowerCase() || '';
       const fileData = rawFileData.startsWith('data:;')
         ? rawFileData.replace('data:;', `data:${FALLBACK_MIME_TYPES[extension] || 'application/octet-stream'};`)
         : rawFileData;
@@ -111,8 +120,8 @@ export function SyllabusImporter({ onReview }: { onReview: (meeting: ExtractedCl
     <div className="mt-6 rounded-[1.6rem] border border-indigo-300/15 bg-indigo-400/[0.055] p-5 sm:p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <div className="flex items-center gap-2 font-semibold text-white"><Sparkles className="h-4 w-4 text-indigo-300" /> Import from a syllabus</div>
-          <p className="mt-1 text-sm leading-relaxed text-slate-400">Upload a syllabus and ClassDash will find the course name and recurring meeting times. You review every result and place its map pin before it is saved.</p>
+          <div className="flex items-center gap-2 font-semibold text-white"><Sparkles className="h-4 w-4 text-indigo-300" /> Import your schedule</div>
+          <p className="mt-1 text-sm leading-relaxed text-slate-400">Upload an ICS calendar or a syllabus. ClassDash finds recurring meeting times, then lets you review every result and place its map pin before saving.</p>
         </div>
         {file && <button type="button" onClick={clear} className="rounded-xl p-2 text-slate-400 hover:bg-white/[0.07] hover:text-white" aria-label="Clear syllabus"><X className="h-4 w-4" /></button>}
       </div>
@@ -120,15 +129,15 @@ export function SyllabusImporter({ onReview }: { onReview: (meeting: ExtractedCl
       <div className="mt-5 flex flex-col gap-3 sm:flex-row">
         <label className="flex min-h-12 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-xl border border-dashed border-white/15 bg-slate-950/35 px-4 py-3 text-sm text-slate-300 hover:border-indigo-300/30 hover:bg-slate-950/55">
           {file ? <FileText className="h-5 w-5 shrink-0 text-indigo-300" /> : <Upload className="h-5 w-5 shrink-0 text-slate-500" />}
-          <span className="min-w-0 truncate">{file ? file.name : 'Choose a syllabus (PDF, Word, or text)'}</span>
-          <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={chooseFile} className="sr-only" />
+          <span className="min-w-0 truncate">{file ? file.name : 'Choose an ICS calendar or syllabus'}</span>
+          <input ref={inputRef} type="file" accept=".ics,.pdf,.doc,.docx,.txt,.md,.rtf,.odt" onChange={chooseFile} className="sr-only" />
         </label>
         <button type="button" onClick={() => void extract()} disabled={!file || extracting} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-indigo-500 px-5 text-sm font-semibold text-white hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-45">
-          {extracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          {extracting ? 'Reading syllabus…' : 'Extract classes'}
+          {extracting ? <Loader2 className="h-4 w-4 animate-spin" /> : selectedExtension === 'ics' ? <CalendarDays className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+          {extracting ? 'Reading schedule…' : selectedExtension === 'ics' ? 'Import calendar' : 'Extract classes'}
         </button>
       </div>
-      <p className="mt-3 text-xs leading-relaxed text-slate-500">Maximum 3 MB. When you click Extract, the document is sent securely to OpenAI for analysis; it is not added to your Olio files.</p>
+      <p className="mt-3 text-xs leading-relaxed text-slate-500">Maximum 3 MB. ICS files are parsed privately on this device. Syllabus documents are sent securely to OpenAI for analysis and are not added to your Olio files.</p>
 
       {error && <div className="mt-4 flex items-start gap-2 rounded-xl border border-rose-400/20 bg-rose-400/[0.08] px-3 py-2.5 text-sm text-rose-100"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
 

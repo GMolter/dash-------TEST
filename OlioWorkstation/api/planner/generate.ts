@@ -153,7 +153,7 @@ async function handleSyllabusImport(req: any, res: any, body: any, apiKey: strin
             code: { type: 'string' },
             title: { type: 'string' },
             section: { type: 'string' },
-            days: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 6 }, uniqueItems: true },
+            days: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 6 } },
             startTime: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' },
             endTime: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' },
             locationName: { type: 'string' },

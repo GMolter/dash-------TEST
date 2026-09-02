@@ -33,6 +33,11 @@ export type ClassInstance = {
   leaveAt: Date;
   walkMinutes: number;
   dayOffset: number;
+  originType: 'home' | 'class';
+  originName: string;
+  previousMeeting: ClassMeeting | null;
+  gapMinutes: number | null;
+  tightConnection: boolean;
 };
 
 export type ClassDashStatus = 'waiting' | 'leave-now' | 'in-class';
@@ -42,6 +47,7 @@ export const CLASSDASH_BUFFER_MINUTES = 5;
 export const DEFAULT_WALKING_SPEED_KPH = 4.8;
 // Campus paths are rarely straight lines. This makes a safe key-free estimate.
 export const WALKING_ROUTE_FACTOR = 1.2;
+export const CLASS_TO_CLASS_GAP_MINUTES = 45;
 
 export const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -86,19 +92,37 @@ export function buildClassInstances(
     date.setDate(now.getDate() + offset);
     const dateKey = localDateKey(date);
 
-    for (const meeting of meetings) {
-      if (!meeting.days.includes(date.getDay())) continue;
-      if (meeting.term_start && dateKey < meeting.term_start) continue;
-      if (meeting.term_end && dateKey > meeting.term_end) continue;
+    const dailyMeetings = meetings
+      .filter((meeting) => meeting.days.includes(date.getDay()))
+      .filter((meeting) => !meeting.term_start || dateKey >= meeting.term_start)
+      .filter((meeting) => !meeting.term_end || dateKey <= meeting.term_end)
+      .map((meeting) => ({ meeting, start: dateAtTime(date, meeting.start_time), end: dateAtTime(date, meeting.end_time) }))
+      .sort((a, b) => a.start.getTime() - b.start.getTime() || a.meeting.sort_order - b.meeting.sort_order);
 
-      const start = dateAtTime(date, meeting.start_time);
-      const end = dateAtTime(date, meeting.end_time);
-      const walkMinutes = estimateWalkingMinutes(
-        { lat: settings.dorm_lat, lng: settings.dorm_lng },
-        { lat: meeting.location_lat, lng: meeting.location_lng },
-      );
+    for (let index = 0; index < dailyMeetings.length; index += 1) {
+      const { meeting, start, end } = dailyMeetings[index];
+      const previous = index > 0 ? dailyMeetings[index - 1] : null;
+      const gapMinutes = previous ? Math.round((start.getTime() - previous.end.getTime()) / 60_000) : null;
+      const startsFromClass = !!previous && gapMinutes !== null && gapMinutes >= 0 && gapMinutes <= CLASS_TO_CLASS_GAP_MINUTES;
+      const origin = startsFromClass
+        ? { lat: previous.meeting.location_lat, lng: previous.meeting.location_lng }
+        : { lat: settings.dorm_lat, lng: settings.dorm_lng };
+      const walkMinutes = estimateWalkingMinutes(origin, { lat: meeting.location_lat, lng: meeting.location_lng });
       const leaveAt = new Date(start.getTime() - (walkMinutes + CLASSDASH_BUFFER_MINUTES) * 60_000);
-      result.push({ meeting, date, start, end, leaveAt, walkMinutes, dayOffset: offset });
+      result.push({
+        meeting,
+        date,
+        start,
+        end,
+        leaveAt,
+        walkMinutes,
+        dayOffset: offset,
+        originType: startsFromClass ? 'class' : 'home',
+        originName: startsFromClass ? previous!.meeting.location_name : settings.dorm_name,
+        previousMeeting: startsFromClass ? previous!.meeting : null,
+        gapMinutes,
+        tightConnection: startsFromClass && !!previous && leaveAt < previous.end,
+      });
     }
   }
   return result.sort((a, b) => a.start.getTime() - b.start.getTime());
