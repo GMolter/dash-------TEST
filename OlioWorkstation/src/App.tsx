@@ -2,6 +2,8 @@ import { lazy, useState, useEffect } from 'react';
 import { AnimatedBackground } from './components/AnimatedBackground';
 import { Quicklinks } from './components/Quicklinks';
 import { DashboardTodosHomeHeader } from './components/DashboardTodos';
+import { ClassDashWidget } from './components/ClassDashWidget';
+import { DashboardShortcuts } from './components/DashboardShortcuts';
 import { AppNavigation } from './components/AppNavigation';
 import { useAuth } from './hooks/useAuth';
 import { useOrg } from './hooks/useOrg';
@@ -20,6 +22,7 @@ import {
   setStoredAppBackgroundTheme,
 } from './lib/appTheme';
 import { AlertTriangle } from 'lucide-react';
+import { useDashboardConfiguration } from './hooks/useDashboardConfiguration';
 import {
   launcherAuthorizationAccess,
   parseLauncherAuthorizationLocation,
@@ -46,6 +49,8 @@ const ProfileSettings = lazy(() => import('./pages/ProfileSettings').then(({ Pro
 const HelpPage = lazy(() => import('./pages/HelpPage').then(({ HelpPage: Component }) => ({ default: Component })));
 const HelpArticlePage = lazy(() => import('./pages/HelpArticlePage').then(({ HelpArticlePage: Component }) => ({ default: Component })));
 const LauncherAuthorization = lazy(() => import('./pages/LauncherAuthorization').then(({ LauncherAuthorization: Component }) => ({ default: Component })));
+const ClassDashPage = lazy(() => import('./pages/ClassDashPage').then(({ ClassDashPage: Component }) => ({ default: Component })));
+const PluginManager = lazy(() => import('./components/PluginManager').then(({ PluginManager: Component }) => ({ default: Component })));
 
 type View =
   | { type: 'home' }
@@ -56,6 +61,7 @@ type View =
   | { type: 'profile' }
   | { type: 'help' }
   | { type: 'help-article'; slug: string }
+  | { type: 'classdash' }
   | { type: 'tool'; tool: string }
   | { type: 'redirect'; code: string }
   | { type: 'secret'; code: string }
@@ -93,6 +99,7 @@ function writeBannerCache(banner: BannerState) {
 function App() {
   const { user, loading: authLoading } = useAuth();
   const { profile, organization } = useOrg();
+  const { modules: dashboardModules } = useDashboardConfiguration();
 
   const [view, setView] = useState<View>({ type: 'home' });
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -257,6 +264,11 @@ function App() {
         return;
       }
 
+      if (cleanPath === '/classdash') {
+        setView({ type: 'classdash' });
+        return;
+      }
+
       if (cleanPath === '/p' || cleanPath === '/pastes') {
         setView({ type: 'paste-list' });
         if (window.location.pathname !== '/') window.history.replaceState({}, '', '/');
@@ -339,11 +351,15 @@ function App() {
     { id: 'qr', label: 'QR Generator', icon: '📱', desc: 'Generate QR codes' },
     { id: 'quick-pastes', label: 'Quick Pastes', icon: '📋', desc: 'Manage private reusable text' },
     { id: 'pastebin', label: 'Pastebin', icon: '📝', desc: 'Share code/text' },
+    { id: 'plugins', label: 'Plugins & Dashboard', icon: '🧩', desc: 'Install modules and customize Home' },
   ];
 
-  const renderHome = () => (
+  const renderHome = () => {
+    const enabled = new Set(dashboardModules.filter((module) => module.enabled && module.available).map((module) => module.id));
+    const orderedContentModules = dashboardModules.filter((module) => module.enabled && module.available && module.id !== 'tasks');
+    return (
     <div className="mx-auto min-h-screen w-full max-w-[88rem] px-5 pb-16 sm:px-8 lg:px-12">
-      <DashboardTodosHomeHeader />
+      {enabled.has('tasks') && <DashboardTodosHomeHeader />}
       <section className="mx-auto max-w-4xl pt-24 text-center md:pt-6 lg:pt-5">
         <h1 className="text-3xl font-semibold tracking-[-0.03em] text-white drop-shadow-[0_5px_28px_rgba(255,255,255,0.12)] sm:text-4xl lg:text-4xl">
           Olio Workstation
@@ -369,11 +385,17 @@ function App() {
         </div>
       )}
 
-      <section className="mt-7 sm:mt-8 lg:mt-8" aria-label="Quick Links">
-        <Quicklinks editMode={false} />
-      </section>
+      <div className="mt-7 space-y-6 sm:mt-8 lg:mt-8">
+        {orderedContentModules.map((module) => {
+          if (module.id === 'classdash') return <ClassDashWidget key={module.id} onOpen={() => navigateTo('/classdash')} />;
+          if (module.id === 'quicklinks') return <section key={module.id} aria-label="Quick Links"><Quicklinks editMode={false} /></section>;
+          if (module.id === 'shortcuts') return <DashboardShortcuts key={module.id} onNavigate={navigateTo} onOpenTool={(tool) => setView({ type: 'tool', tool })} />;
+          return null;
+        })}
+      </div>
     </div>
-  );
+    );
+  };
 
   const renderUtilities = () => {
     if (view.type === 'tool') {
@@ -392,6 +414,7 @@ function App() {
           {view.tool === 'qr' && <QRCodeGenerator />}
           {view.tool === 'quick-pastes' && <QuickPastes />}
           {view.tool === 'pastebin' && <Pastebin />}
+          {view.tool === 'plugins' && <PluginManager onNavigate={navigateTo} />}
         </div>
       );
     }
@@ -422,6 +445,7 @@ function App() {
     if (view.type === 'profile') return '/profile';
     if (view.type === 'help') return '/help';
     if (view.type === 'help-article') return `/help/article/${view.slug}`;
+    if (view.type === 'classdash') return '/classdash';
     return window.location.pathname || '/';
   })();
 
@@ -542,6 +566,7 @@ function App() {
                 }}
               />
             )}
+            {view.type === 'classdash' && <ClassDashPage />}
             {view.type === 'admin' && <Admin />}
             {view.type === 'tool' && view.tool === 'notfound' && <NotFound />}
           </main>
