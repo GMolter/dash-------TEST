@@ -38,7 +38,13 @@ export function ClassDashWidget({ onOpen, full = false }: { onOpen: () => void; 
   );
   const next = instances.find((instance) => instance.end > now);
 
-  if (loading) return <div className="glass-panel h-48 animate-pulse rounded-[2rem]" role="status" aria-label="Loading ClassDash" />;
+  if (loading) return (
+    <div className="glass-panel flex h-full min-h-48 animate-pulse flex-col justify-between rounded-[1.6rem] p-5 sm:p-6" role="status" aria-label="Loading ClassDash">
+      <div className="flex items-center justify-between"><div className="h-3 w-40 rounded-full bg-white/[0.08]" /><div className="h-8 w-16 rounded-xl bg-white/[0.06]" /></div>
+      <div className="flex items-end justify-between gap-6"><div className="space-y-2"><div className="h-8 w-32 rounded-lg bg-white/[0.09]" /><div className="h-3 w-48 max-w-full rounded-full bg-white/[0.06]" /></div><div className="h-10 w-40 rounded-lg bg-white/[0.08]" /></div>
+      <div className="grid grid-cols-2 gap-2.5 border-t border-white/[0.06] pt-3"><div className="h-11 rounded-xl bg-white/[0.05]" /><div className="h-11 rounded-xl bg-white/[0.05]" /></div>
+    </div>
+  );
   if (error) return <div className="glass-panel rounded-[2rem] border-rose-400/20 p-5 text-sm text-rose-100">{error}</div>;
   if (!installed) return null;
 

@@ -7,6 +7,40 @@ import { DASHBOARD_CONFIGURATION_CHANGED_EVENT } from './useDashboardConfigurati
 
 type MeetingDraft = Omit<ClassMeeting, 'id' | 'user_id' | 'sort_order'> & { id?: string };
 
+type ClassDashCache = {
+  installed: boolean;
+  settings: ClassDashSettings | null;
+  meetings: ClassMeeting[];
+};
+
+const CLASSDASH_CACHE_PREFIX = 'olio-classdash-v1';
+
+function classDashCacheKey(userId: string) {
+  return `${CLASSDASH_CACHE_PREFIX}:${userId}`;
+}
+
+function readClassDashCache(userId: string): ClassDashCache | null {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(classDashCacheKey(userId)) || 'null') as Partial<ClassDashCache> | null;
+    if (!parsed || typeof parsed.installed !== 'boolean' || !Array.isArray(parsed.meetings)) return null;
+    return {
+      installed: parsed.installed,
+      settings: parsed.settings ?? null,
+      meetings: parsed.meetings as ClassMeeting[],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeClassDashCache(userId: string, value: ClassDashCache) {
+  try {
+    window.localStorage.setItem(classDashCacheKey(userId), JSON.stringify(value));
+  } catch {
+    // Account storage remains authoritative when browser storage is unavailable.
+  }
+}
+
 export function useClassDash() {
   const { user } = useAuth();
   const [installed, setInstalled] = useState(false);
@@ -24,6 +58,19 @@ export function useClassDash() {
       setLoading(false);
       return;
     }
+    const cached = readClassDashCache(user.id);
+    if (cached) {
+      setInstalled(cached.installed);
+      setSettings(cached.settings);
+      setMeetings(cached.meetings);
+      setError(null);
+      setLoading(false);
+    } else {
+      setInstalled(false);
+      setSettings(null);
+      setMeetings([]);
+      setLoading(true);
+    }
     const [installationResult, settingsResult, meetingsResult] = await Promise.all([
       supabase.from('user_plugin_installations').select('plugin_id').eq('user_id', user.id).eq('plugin_id', CLASSDASH_PLUGIN_ID).maybeSingle(),
       supabase.from('classdash_settings').select('*').eq('user_id', user.id).maybeSingle(),
@@ -31,12 +78,18 @@ export function useClassDash() {
     ]);
     const firstError = installationResult.error || settingsResult.error || meetingsResult.error;
     if (firstError) {
-      setError(`ClassDash data is unavailable. Apply the latest Supabase migration. ${firstError.message}`);
+      if (!cached) setError(`ClassDash data is unavailable. Apply the latest Supabase migration. ${firstError.message}`);
     } else {
+      const nextValue: ClassDashCache = {
+        installed: !!installationResult.data,
+        settings: (settingsResult.data as ClassDashSettings | null) ?? null,
+        meetings: (meetingsResult.data || []) as ClassMeeting[],
+      };
       setError(null);
-      setInstalled(!!installationResult.data);
-      setSettings((settingsResult.data as ClassDashSettings | null) ?? null);
-      setMeetings((meetingsResult.data || []) as ClassMeeting[]);
+      setInstalled(nextValue.installed);
+      setSettings(nextValue.settings);
+      setMeetings(nextValue.meetings);
+      writeClassDashCache(user.id, nextValue);
     }
     setLoading(false);
   }, [user]);
@@ -112,4 +165,3 @@ export function useClassDash() {
 
   return { installed, settings, meetings, loading, syncing, error, saveSettings, saveMeeting, deleteMeeting, refresh };
 }
-

@@ -46,6 +46,7 @@ export function ClassDashPage() {
   const { installPlugin } = useDashboardConfiguration();
   const [dormName, setDormName] = useState('');
   const [dormCoordinates, setDormCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const [showHomeEditor, setShowHomeEditor] = useState(false);
   const [meetingForm, setMeetingForm] = useState<MeetingForm>(EMPTY_MEETING);
   const [showMeetingForm, setShowMeetingForm] = useState(false);
   const [formError, setFormError] = useState('');
@@ -77,7 +78,10 @@ export function ClassDashPage() {
       dorm_lng: dormCoordinates.lng,
       walking_speed_kph: DEFAULT_WALKING_SPEED_KPH,
     });
-    if (saved) setSavedMessage('Home location saved. All leave times have been recalculated.');
+    if (saved) {
+      setSavedMessage('Home location saved. All leave times have been recalculated.');
+      setShowHomeEditor(false);
+    }
   };
 
   const submitMeeting = async (event: FormEvent) => {
@@ -195,16 +199,28 @@ export function ClassDashPage() {
         </div>
       )}
 
-      <form onSubmit={saveDorm} className="glass-panel rounded-[2rem] p-6 sm:p-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div><div className="flex items-center gap-2 text-lg font-semibold text-white"><MapPin className="h-5 w-5 text-violet-300" /> Home base</div><p className="mt-1 text-sm text-slate-400">Trips start here for your first class and whenever the previous class ended more than 45 minutes ago. Shorter gaps use the previous classroom. Walking uses an average 12.5 min/km pace plus a five-minute buffer.</p></div>
-          <button type="submit" disabled={syncing} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400 disabled:opacity-60"><Save className="h-4 w-4" /> Save home</button>
-        </div>
-        <div className="mt-6">
-          <label className="text-sm text-slate-300">Dorm or home name<input value={dormName} onChange={(event) => setDormName(event.target.value)} placeholder="Teter Quad" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none focus:border-violet-300/40" /></label>
-        </div>
-        <div className="mt-6"><MapLocationPicker key={settings ? `${settings.dorm_lat}-${settings.dorm_lng}` : 'new-home'} label="Place your dorm or home pin" value={dormCoordinates} onChange={setDormCoordinates} onPlaceSelected={(place) => { if (!dormName.trim()) setDormName(place); }} /></div>
-      </form>
+      {settings && !showHomeEditor ? (
+        <section className="glass-panel rounded-[1.6rem] px-5 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-300/15 bg-violet-400/10"><MapPin className="h-5 w-5 text-violet-200" /></span>
+              <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Home base</div><div className="mt-0.5 truncate font-semibold text-white">{settings.dorm_name}</div></div>
+            </div>
+            <button type="button" onClick={() => setShowHomeEditor(true)} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-2 text-sm font-medium text-slate-300 hover:bg-white/[0.08] hover:text-white"><Pencil className="h-4 w-4" /> Edit home</button>
+          </div>
+        </section>
+      ) : (
+        <form onSubmit={saveDorm} className="glass-panel rounded-[2rem] p-6 sm:p-8">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div><div className="flex items-center gap-2 text-lg font-semibold text-white"><MapPin className="h-5 w-5 text-violet-300" /> Home base</div><p className="mt-1 max-w-3xl text-sm text-slate-400">Trips start here for your first class and whenever the previous class ended more than 45 minutes ago. Shorter gaps use the previous classroom. Walking uses an average 12.5 min/km pace plus a five-minute buffer.</p></div>
+            <div className="flex items-center gap-2">{settings && <button type="button" onClick={() => { setDormName(settings.dorm_name); setDormCoordinates({ lat: settings.dorm_lat, lng: settings.dorm_lng }); setShowHomeEditor(false); }} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-medium text-slate-300 hover:bg-white/[0.06]">Cancel</button>}<button type="submit" disabled={syncing} className="inline-flex items-center gap-2 rounded-xl bg-violet-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-400 disabled:opacity-60"><Save className="h-4 w-4" /> Save home</button></div>
+          </div>
+          <div className="mt-6">
+            <label className="text-sm text-slate-300">Dorm or home name<input value={dormName} onChange={(event) => setDormName(event.target.value)} placeholder="Teter Quad" className="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/60 px-4 py-3 text-white outline-none focus:border-violet-300/40" /></label>
+          </div>
+          <div className="mt-6"><MapLocationPicker key={settings ? `${settings.dorm_lat}-${settings.dorm_lng}` : 'new-home'} label="Place your dorm or home pin" value={dormCoordinates} onChange={setDormCoordinates} onPlaceSelected={(place) => { if (!dormName.trim()) setDormName(place); }} /></div>
+        </form>
+      )}
 
       <section id="class-editor" className="glass-panel scroll-mt-28 rounded-[2rem] p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">

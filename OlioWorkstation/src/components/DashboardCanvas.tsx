@@ -320,14 +320,18 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
   const openFolder = folders.find((folder) => folder.id === openFolderId);
   const openFolderLinks = openFolder ? quicklinks.filter((link) => link.folder_id === openFolder.id) : [];
   const folderOverlay = openFolder && typeof document !== 'undefined' ? createPortal(
-    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="quicklink-folder-title" onMouseDown={(event) => { if (event.target === event.currentTarget) setOpenFolderId(null); }}>
-      <section className="glass-panel max-h-[min(760px,90vh)] w-full max-w-4xl overflow-y-auto rounded-[2rem] border border-violet-300/20 p-5 shadow-2xl sm:p-7">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3"><FolderIcon folder={openFolder} /><div className="min-w-0"><h2 id="quicklink-folder-title" className="truncate text-2xl font-semibold text-white">{openFolder.name}</h2><p className="mt-1 text-sm text-slate-400">{openFolderLinks.length} {openFolderLinks.length === 1 ? 'quick link' : 'quick links'}</p></div></div>
-          <button type="button" onClick={() => setOpenFolderId(null)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/[0.07] hover:text-white" aria-label="Close folder"><X className="h-5 w-5" /></button>
-        </div>
-        {openFolderLinks.length > 0 ? <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{openFolderLinks.map((link) => <div key={link.id} className="min-h-44"><QuicklinkCard link={link} /></div>)}</div> : <div className="mt-6 rounded-2xl border border-dashed border-white/15 p-10 text-center text-sm text-slate-400">This folder is empty. Use Manage links to add something.</div>}
-      </section>
+    <div className="fixed inset-0 z-[160] bg-slate-950/72 px-4 py-6 backdrop-blur-md sm:px-6 sm:py-10" role="dialog" aria-modal="true" aria-labelledby="quicklink-folder-title" onClick={() => setOpenFolderId(null)}>
+      <div className="mx-auto flex h-full max-w-5xl items-center justify-center">
+        <section className="glass-panel ql-folder-focus relative max-h-full w-full overflow-hidden rounded-[2rem] border border-violet-200/15 bg-slate-950/75 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_40px_120px_rgba(30,27,75,0.55)] sm:p-6" onClick={(event) => event.stopPropagation()}>
+          <div className="pointer-events-none absolute -left-24 -top-28 h-72 w-72 rounded-full bg-indigo-500/15 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-36 right-0 h-80 w-80 rounded-full bg-violet-500/10 blur-3xl" />
+          <div className="relative mb-5 flex items-center justify-between gap-4">
+            <div className="flex min-w-0 items-center gap-3 sm:gap-4"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.12)] sm:h-14 sm:w-14"><FolderIcon folder={openFolder} /></div><div className="min-w-0"><h2 id="quicklink-folder-title" className="truncate text-lg font-semibold text-white sm:text-2xl">{openFolder.name}</h2><p className="text-sm text-slate-400 sm:text-base">{openFolderLinks.length} {openFolderLinks.length === 1 ? 'link' : 'links'}</p></div></div>
+            <button type="button" onClick={() => setOpenFolderId(null)} className="rounded-full border border-white/10 bg-white/[0.055] px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-white/[0.1] sm:text-sm">Close</button>
+          </div>
+          {openFolderLinks.length > 0 ? <div className="relative max-h-[min(68vh,40rem)] overflow-y-auto pr-1 sm:pr-2"><div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">{openFolderLinks.map((link, index) => <a key={link.id} href={formattedUrl(link.url)} className="ql-pop-in flex min-h-[9.75rem] flex-col items-center justify-center rounded-2xl border border-white/10 bg-white/[0.055] px-3 py-6 text-center opacity-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition hover:-translate-y-0.5 hover:border-indigo-300/25 hover:bg-white/[0.09] sm:min-h-[11rem] sm:rounded-[1.4rem] sm:px-4 sm:py-7" style={{ animationDelay: `${index * 36}ms` }}><div className="mb-3 flex justify-center sm:mb-4"><QuicklinkIcon link={link} /></div><span className="block text-[13px] font-medium leading-tight text-white sm:text-sm">{link.title}</span></a>)}</div></div> : <div className="relative rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-8 text-center text-sm text-slate-400">Empty folder</div>}
+        </section>
+      </div>
     </div>,
     document.body,
   ) : null;
