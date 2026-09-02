@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowRight, Clipboard, EyeOff, Folder, Grid2X2, LayoutGrid, Link2, Maximize2, Plus, QrCode, Redo2, RotateCcw, Undo2, X } from 'lucide-react';
 import { DashboardLayoutItem, DashboardQuicklink, DashboardQuicklinkFolder, useFreeformDashboard } from '../hooks/useFreeformDashboard';
 import { useDashboardConfiguration } from '../hooks/useDashboardConfiguration';
-import { ClassDashWidget } from './ClassDashWidget';
+import { ClassDashPlaceholder, ClassDashWidget } from './ClassDashWidget';
 import { DashboardTodosHomeHeader } from './DashboardTodos';
 
 const COLUMNS = 12;
@@ -133,7 +133,11 @@ function QuicklinkCard({ link }: { link: DashboardQuicklink }) {
 }
 
 function FolderIcon({ folder }: { folder: DashboardQuicklinkFolder }) {
-  if (folder.icon && folder.icon !== 'folder') return <span className="text-4xl leading-none">{folder.icon}</span>;
+  const icon = (folder.icon || '').trim();
+  const isUrl = /^https?:\/\//i.test(icon);
+  const [failedSrc, setFailedSrc] = useState('');
+  if (isUrl && failedSrc !== icon) return <img src={icon} alt="" className="h-12 w-12 rounded-xl object-cover" onError={() => setFailedSrc(icon)} />;
+  if (icon && icon !== 'folder' && !isUrl) return <span className="text-4xl leading-none">{icon}</span>;
   return <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-400/10"><Folder className="h-7 w-7 text-violet-200" /></span>;
 }
 
@@ -160,7 +164,7 @@ function ShortcutCard({ shortcut, onNavigate, onOpenTool }: { shortcut: keyof ty
 }
 
 export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTool }: { editing: boolean; onEditingChange: (editing: boolean) => void; onNavigate: (path: string) => void; onOpenTool: (tool: string) => void }) {
-  const { modules, syncing, error, updateModule, resetLayout } = useDashboardConfiguration();
+  const { modules, loading: configurationLoading, syncing, error, updateModule, resetLayout } = useDashboardConfiguration();
   const { layouts: storedLayouts, quicklinks, folders, loading, warning, saveLayouts } = useFreeformDashboard();
   const [workingLayouts, setWorkingLayouts] = useState<Record<string, DashboardLayoutItem>>({});
   const [interaction, setInteraction] = useState<Interaction | null>(null);
@@ -179,12 +183,12 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
 
   const items = useMemo<CanvasItem[]>(() => {
     const next: CanvasItem[] = [];
-    if (classdashModule?.available) next.push({ id: 'plugin:classdash', kind: 'classdash', title: 'ClassDash', minWidth: 6, minHeight: 3, defaultWidth: 12, defaultHeight: 3 });
+    if (configurationLoading || classdashModule?.available) next.push({ id: 'plugin:classdash', kind: 'classdash', title: 'ClassDash', minWidth: 6, minHeight: 3, defaultWidth: 12, defaultHeight: 3 });
     quicklinks.filter((link) => !link.folder_id).forEach((link) => next.push({ id: `quicklink:${link.id}`, kind: 'quicklink', title: link.title, minWidth: 2, minHeight: 2, defaultWidth: 3, defaultHeight: 3, quicklink: link }));
     folders.forEach((folder) => next.push({ id: `folder:${folder.id}`, kind: 'folder', title: folder.name, minWidth: 2, minHeight: 2, defaultWidth: 3, defaultHeight: 3, folder }));
     (Object.keys(SHORTCUTS) as Array<keyof typeof SHORTCUTS>).forEach((shortcut) => next.push({ id: `shortcut:${shortcut}`, kind: 'shortcut', title: SHORTCUTS[shortcut].label, minWidth: 2, minHeight: 2, defaultWidth: 4, defaultHeight: 2, shortcut }));
     return next;
-  }, [classdashModule?.available, folders, quicklinks]);
+  }, [classdashModule?.available, configurationLoading, folders, quicklinks]);
   useEffect(() => {
     if (interactionRef.current) return;
     setWorkingLayouts(mergeLayouts(items, storedLayouts));
@@ -200,7 +204,7 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
     return () => observer.disconnect();
   }, []);
 
-  const groupVisible = (item: CanvasItem) => item.kind === 'classdash' ? !!classdashModule?.enabled : item.kind === 'quicklink' || item.kind === 'folder' ? !!quicklinksModule?.enabled : !!shortcutsModule?.enabled;
+  const groupVisible = (item: CanvasItem) => item.kind === 'classdash' ? configurationLoading || !!classdashModule?.enabled : item.kind === 'quicklink' || item.kind === 'folder' ? !!quicklinksModule?.enabled : !!shortcutsModule?.enabled;
   const visibleItems = items.filter((item) => groupVisible(item) && !workingLayouts[item.id]?.hidden);
   const hiddenItems = items.filter((item) => workingLayouts[item.id]?.hidden);
   const compact = canvasWidth < 760;
@@ -308,7 +312,7 @@ export function DashboardCanvas({ editing, onEditingChange, onNavigate, onOpenTo
   };
 
   const renderItem = (item: CanvasItem) => {
-    if (item.kind === 'classdash') return <ClassDashWidget onOpen={() => onNavigate('/classdash')} />;
+    if (item.kind === 'classdash') return configurationLoading ? <ClassDashPlaceholder /> : <ClassDashWidget onOpen={() => onNavigate('/classdash')} />;
     if (item.kind === 'quicklink' && item.quicklink) return <QuicklinkCard link={item.quicklink} />;
     if (item.kind === 'folder' && item.folder) return <FolderCard folder={item.folder} linkCount={quicklinks.filter((link) => link.folder_id === item.folder!.id).length} onOpen={() => setOpenFolderId(item.folder!.id)} />;
     if (item.kind === 'shortcut' && item.shortcut) return <ShortcutCard shortcut={item.shortcut} onNavigate={onNavigate} onOpenTool={onOpenTool} />;

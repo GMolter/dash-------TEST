@@ -200,15 +200,9 @@ export function ClassDashPage() {
       )}
 
       {settings && !showHomeEditor ? (
-        <section className="glass-panel rounded-[1.6rem] px-5 py-4 sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-violet-300/15 bg-violet-400/10"><MapPin className="h-5 w-5 text-violet-200" /></span>
-              <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Home base</div><div className="mt-0.5 truncate font-semibold text-white">{settings.dorm_name}</div></div>
-            </div>
-            <button type="button" onClick={() => setShowHomeEditor(true)} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3.5 py-2 text-sm font-medium text-slate-300 hover:bg-white/[0.08] hover:text-white"><Pencil className="h-4 w-4" /> Edit home</button>
-          </div>
-        </section>
+        <div className="flex justify-end">
+          <button type="button" onClick={() => setShowHomeEditor(true)} className="glass-control inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold"><MapPin className="h-4 w-4 text-violet-300" /> Edit Home Location</button>
+        </div>
       ) : (
         <form onSubmit={saveDorm} className="glass-panel rounded-[2rem] p-6 sm:p-8">
           <div className="flex flex-wrap items-start justify-between gap-4">
